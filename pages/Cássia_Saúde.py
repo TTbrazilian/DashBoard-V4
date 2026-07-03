@@ -25,9 +25,7 @@ st.markdown("""
             from { opacity:0; transform:translateX(20px); }
             to   { opacity:1; transform:translateX(0);    }
         }
-        .stButton button {
-            animation: slideIn 0.4s ease-out;
-        }
+        .stButton button { animation: slideIn 0.4s ease-out; }
         [data-testid="stSidebarNav"] li:first-child > a > span,
         [data-testid="stSidebarNav"] li:first-child > a > p {
             display: none !important;
@@ -36,11 +34,48 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 pio.templates.default = "plotly_white"
+CONFIG_PT = {'displaylogo': False, 'showTips': False}
 
-CONFIG_PT = {
-    'displaylogo': False,
-    'showTips': False,
+MESES_ORDEM = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho',
+               'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
+
+# Rótulos amigáveis das fontes de saúde (baseado no Cássia_DF.csv)
+FONTE_LABEL = {
+    '1500':'1500 · Próprio Saúde','1600':'1600 · Federal Custeio','1601':'1601 · Federal Capital',
+    '1602':'1602 · Covid','1603':'1603 · Covid','1604':'1604 · Agentes','1605':'1605 · Piso Enferm.',
+    '1621':'1621 · Estadual','1631':'1631 · Conv. Federal','1659':'1659 · Trans. Federais',
+    '2621':'2621 · Supr. Estadual','1706':'1706 · Emenda Federal',
 }
+def fonte_lbl(f): return FONTE_LABEL.get(str(f).strip(), f"Fonte {f}")
+
+# Paleta para despesas por fonte
+CORES_FONTE = {
+    '1500':'#7f8c8d','1600':'#2E86C1','1601':'#154360','1602':'#8e44ad','1603':'#9b59b6',
+    '1604':'#16a085','1605':'#f39c12','1621':'#27ae60','1631':'#2980b9','1659':'#1abc9c',
+    '2621':'#e67e22','1706':'#c0392b',
+}
+def cor_fonte(f): return CORES_FONTE.get(str(f).strip(), '#95a5a6')
+
+C_FEDERAL  = '#2E86C1'
+C_ESTADUAL = '#28B463'
+
+# Elementos de folha/pessoal (ajustável). Usados em "Folha por Fonte".
+FOLHA_ELEMENTOS = [
+    'Vencimentos e Vantagens Fixas - Pessoal Civil',
+    'Obrigações Patronais',
+    'Contratação por tempo Determinado',
+    'Outras Despesas Variáveis - Pessoal Civil',
+    'Indenizações e Restituições Trabalhistas',
+    'Auxílio-Alimentação',
+    'Diárias - Pessoal Civil',
+    'Outras Despesas de Pessoal decorrentes de Contratos',
+]
+
+CAPITAL_ELEM = [
+    'Equipamentos e Materiais Permanentes',
+    'Obras e Instalações',
+    'Aquisição de Imóveis',
+]
 
 # ── FUNÇÕES UTILITÁRIAS ───────────────────────────────────────────────────────
 def remover_acentos(texto):
@@ -63,95 +98,66 @@ def formar_real(valor):
     if valor is None: return "R$ 0,00"
     return f"R$ {valor:,.2f}".replace(",","X").replace(".",",").replace("X",".")
 
+def soma_cols(df, cols):
+    presentes = [c for c in cols if c in df.columns]
+    return df[presentes].sum().sum() if presentes else 0.0
+
 # ── CARGA DE DADOS ────────────────────────────────────────────────────────────
-# Especificidades Cássia:
-# • Cássia.csv: mesmo padrão — header=1, colunas triplicadas por mês.
-#   'Abril .1' com espaço → rename_liq explícito. Linhas NaN no final → filtradas.
-# • 5 categorias padrão: Atenção Primária, Vigilância, Farmácia, MAC, Secretaria.
-# • Capital Liq = R$ 8.677,98 | Custeio Liq = R$ 9.625.595,86
-# • Total Liq Jan–Mar = R$ 9.634.273,84
-# • Cássia_DF.csv: NÃO tem linha com Tipo='Liquidado'.
-#   O estágio Liquidado é rotulado como 'Empenho' neste arquivo.
-#   Mapeamento: 'Empenho' → 'Liquidado' na leitura.
-#   Linhas de cabeçalho repetidas (Tipo='Tipo') → filtradas.
-# • Cássia_R.csv: só categoria 'Impostos'.
+# Arquivos:
+# • Cássia.csv    — FICHAS (header=1; Empenhado/Liquidado/Pago por mês; '.1'=Liquidado;
+#                   'Abril ' com espaço). 5 categorias.
+# • Cássia_R.csv  — Receitas de Impostos + Cota-Parte (base do índice de 15%).
+# • Cássia_DF.csv — Despesas por Fonte (blocos Empenhado/Liquidado/Pago; fonte 1500 = próprio).
+# • Cássia_RV.csv — Receitas Vinculadas Federais/Estaduais por categoria (novo).
 @st.cache_data
 def load_data():
     diretorio_atual = os.path.dirname(os.path.abspath(__file__))
 
     def _buscar(nome):
-        candidatos = [
-            os.path.join(diretorio_atual, '..', 'zSaúde', nome),
-            os.path.join(diretorio_atual, 'zSaúde', nome),
-            nome,
-        ]
-        for p in candidatos:
+        for p in [os.path.join(diretorio_atual, '..', 'zSaúde', nome),
+                  os.path.join(diretorio_atual, 'zSaúde', nome), nome]:
             if os.path.exists(p): return p
         return None
 
     path_f  = _buscar("Cássia.csv")
     path_r  = _buscar("Cássia_R.csv")
     path_df = _buscar("Cássia_DF.csv")
-    if not path_f: return None, None, None
+    path_rv = _buscar("Cássia_RV.csv")
+    if not path_f: return None, None, None, None
 
     # ── FICHAS ───────────────────────────────────────────────────────────────
     df = pd.read_csv(path_f, sep=None, engine='python', encoding='utf-8', header=1)
     df.columns = [str(c).strip() for c in df.columns]
-
     for col in df.columns:
-        if any(k in col for k in [
-            'Orçado','Creditado','Anulado','Saldo',
-            'Janeiro','Fevereiro','Março','Abril','Maio','Junho',
-            'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro','Total'
-        ]):
+        if any(k in col for k in ['Orçado','Creditado','Anulado','Saldo'] + MESES_ORDEM + ['Total']):
             df[col] = df[col].apply(limpar_valor)
-
     df['Ficha']     = df['Ficha'].astype(str).str.replace('.0','',regex=False).str.strip()
     df['Fonte']     = df['Fonte'].astype(str).str.replace('.0','',regex=False).str.strip()
     df['Categoria'] = df['Categoria'].astype(str).str.strip()
     df['Elemento']  = df['Elemento'].astype(str).str.strip()
     df = df[df['Categoria'] != 'nan'].copy()
 
-    rename_liq = {
-        'Janeiro.1':  'Janeiro_Liq',
-        'Fevereiro.1':'Fevereiro_Liq',
-        'Março.1':    'Março_Liq',
-        'Abril .1':   'Abril_Liq',
-        'Maio.1':     'Maio_Liq',
-        'Junho.1':    'Junho_Liq',
-        'Julho.1':    'Julho_Liq',
-        'Agosto.1':   'Agosto_Liq',
-        'Setembro.1': 'Setembro_Liq',
-        'Outubro.1':  'Outubro_Liq',
-        'Novembro.1': 'Novembro_Liq',
-        'Dezembro.1': 'Dezembro_Liq',
-        'Total.1':    'Total_Liq',
-    }
+    rename_liq = {f"{m}.1": f"{m}_Liq" for m in MESES_ORDEM}
+    rename_liq['Abril .1'] = 'Abril_Liq'   # coluna de Abril tem espaço
+    rename_liq['Total.1']  = 'Total_Liq'
     df = df.rename(columns={k: v for k, v in rename_liq.items() if k in df.columns})
 
-    CAPITAL_ELEM = [
-        'Equipamentos e Materiais Permanentes',
-        'Obras e Instalações',
-        'Aquisição de Imóveis',
-    ]
     df['Natureza'] = df['Elemento'].apply(
         lambda x: 'Capital (Invest.)' if x in CAPITAL_ELEM else 'Custeio (Manut.)'
     )
 
-    # ── RECEITAS ─────────────────────────────────────────────────────────────
+    # ── RECEITAS (Impostos + Cota-Parte) ─────────────────────────────────────
     df_r = None
     if path_r:
         df_r = pd.read_csv(path_r, sep=None, engine='python', encoding='utf-8', header=0)
         df_r.columns = [str(c).strip() for c in df_r.columns]
-        MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho',
-                 'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
+        if 'Categoria' in df_r.columns:
+            df_r['Categoria'] = df_r['Categoria'].astype(str).str.strip()
         for col in df_r.columns:
-            if col.strip() in MESES + ['Total','Orçado Receitas']:
+            if col in MESES_ORDEM + ['Total','Orçado Receitas']:
                 df_r[col] = df_r[col].apply(limpar_valor)
 
-    # ── DESPESAS POR FONTE ────────────────────────────────────────────────────
-    # Cássia: 'Empenho' = Liquidado (nome diferente dos demais municípios).
-    # Também remove linhas de cabeçalho repetidas (Tipo='Tipo').
+    # ── DESPESAS POR FONTE ───────────────────────────────────────────────────
     df_df = None
     if path_df:
         df_df = pd.read_csv(path_df, sep=None, engine='python', encoding='utf-8')
@@ -161,49 +167,74 @@ def load_data():
         df_df['Tipo']  = df_df['Tipo'].str.strip()
         df_df['Fonte'] = df_df['Fonte'].astype(str).str.replace('.0','',regex=False).str.strip()
         for col in df_df.columns:
-            if col in ['Janeiro','Fevereiro','Março','Abril','Maio','Junho',
-                       'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro','Total']:
+            if col in MESES_ORDEM + ['Total']:
                 df_df[col] = df_df[col].apply(limpar_valor)
 
-    return df, df_r, df_df
+    # ── RECEITAS VINCULADAS (Federal/Estadual por categoria) ─────────────────
+    df_rv = None
+    if path_rv:
+        df_rv = pd.read_csv(path_rv, sep=None, engine='python', encoding='utf-8', header=0)
+        df_rv.columns = [str(c).strip() for c in df_rv.columns]
+        for c in ['Origem','Tipo','Categoria']:
+            if c in df_rv.columns: df_rv[c] = df_rv[c].astype(str).str.strip()
+        for col in df_rv.columns:
+            if col in MESES_ORDEM + ['Total','Orçado Receitas']:
+                df_rv[col] = df_rv[col].apply(limpar_valor)
+        # remove linhas vazias/residuais
+        df_rv = df_rv[df_rv['Categoria'].notna() & (df_rv['Categoria'] != 'nan') &
+                      (df_rv['Categoria'] != '')].copy()
 
-df_raw, df_r, df_df = load_data()
+    return df, df_r, df_df, df_rv
 
-# ── INTERFACE ─────────────────────────────────────────────────────────────────
+df_raw, df_r, df_df, df_rv = load_data()
+
+def _detectar_meses(df_f, df_dfonte):
+    out = []
+    for m in MESES_ORDEM:
+        liq = f"{m}_Liq"
+        v_f = df_f[liq].sum() if liq in df_f.columns else 0.0
+        v_d = 0.0
+        if df_dfonte is not None and m in df_dfonte.columns:
+            v_d = df_dfonte[df_dfonte['Tipo'] == 'Liquidado'][m].sum()
+        if abs(v_f) > 0.005 or abs(v_d) > 0.005:
+            out.append(m)
+    return out or ['Janeiro','Fevereiro','Março','Abril']
+
+# ══════════════════════════════════════════════════════════════════════════════
+# INTERFACE
+# ══════════════════════════════════════════════════════════════════════════════
 if df_raw is not None:
 
-    # ── SIDEBAR ───────────────────────────────────────────────────────────────
-    st.sidebar.header("🔍 Filtros")
-
-    if 'busca' not in st.session_state:
-        st.session_state.busca = ""
-
-    busca = st.sidebar.text_input("Filtrar:", value=st.session_state.busca)
-    st.session_state.busca = busca
-
-    st.sidebar.write("---")
-    st.sidebar.write("Categorias:")
+    meses_disp = _detectar_meses(df_raw, df_df)
+    cols_liq = [f"{m}_Liq" for m in meses_disp if f"{m}_Liq" in df_raw.columns]
     cats = sorted(df_raw['Categoria'].dropna().unique())
-    for c in cats:
-        if st.sidebar.button(c, use_container_width=True, key=f"cat_{c}"):
-            st.session_state.busca = c
-            st.rerun()
 
-    if st.sidebar.button("Limpar Filtros", type="secondary", use_container_width=True):
-        st.session_state.busca = ""
+    # ── ESTADO / NAVEGAÇÃO ────────────────────────────────────────────────────
+    if 'modo' not in st.session_state:
+        st.session_state.modo = 'Visão Macro'
+
+    st.sidebar.header("🧭 Navegação")
+    if st.sidebar.button("🌐 Visão Macro", use_container_width=True,
+                         type=("primary" if st.session_state.modo == 'Visão Macro' else "secondary")):
+        st.session_state.modo = 'Visão Macro'
         st.rerun()
 
-    # ── Sidebar universal iG2P ────────────────────────────────────────────────
+    st.sidebar.write("Análise por Categoria:")
+    for c in cats:
+        if st.sidebar.button(c, use_container_width=True, key=f"cat_{c}",
+                             type=("primary" if st.session_state.modo == c else "secondary")):
+            st.session_state.modo = c
+            st.rerun()
+
+    # ── Sidebar universal iG2P (logo como botão Home) ─────────────────────────
     import base64 as _b64
 
     def _ler_logo(nome_arquivo):
         candidatos = [f"Logos/{nome_arquivo}", f"../Logos/{nome_arquivo}"]
         try:
             d = os.path.dirname(__file__)
-            candidatos += [
-                os.path.join(d, "Logos", nome_arquivo),
-                os.path.join(d, "..", "Logos", nome_arquivo),
-            ]
+            candidatos += [os.path.join(d, "Logos", nome_arquivo),
+                           os.path.join(d, "..", "Logos", nome_arquivo)]
         except NameError:
             pass
         for p in candidatos:
@@ -271,8 +302,10 @@ if df_raw is not None:
             "_busy=false;}"
             "run();setTimeout(run,50);setTimeout(run,200);setTimeout(run,600);"
             "try{"
+            "if(window.parent._ig2p_obs)window.parent._ig2p_obs.disconnect();"
             "var _ob=new MutationObserver(function(){run();});"
             "_ob.observe(window.parent.document.body,{childList:true,subtree:true});"
+            "window.parent._ig2p_obs=_ob;"
             "}catch(e){}"
             "})()</script>"
         )
@@ -285,364 +318,321 @@ if df_raw is not None:
         height=0,
     )
 
-    # ── FILTRO GLOBAL ─────────────────────────────────────────────────────────
-    df_filtrado_global = df_raw.copy()
-    if st.session_state.busca:
-        termo = remover_acentos(st.session_state.busca)
-        categorias_existentes = {
-            remover_acentos(cat): cat
-            for cat in df_raw['Categoria'].unique() if pd.notna(cat)
-        }
-        if termo in categorias_existentes:
-            mask = df_filtrado_global['Categoria'].apply(remover_acentos) == termo
-        else:
-            mask = (
-                df_filtrado_global['Categoria'].apply(remover_acentos).str.contains(termo, na=False)
-                | (df_filtrado_global['Ficha'] == st.session_state.busca.strip())
-                | df_filtrado_global['Elemento'].apply(remover_acentos).str.contains(termo, na=False)
-                | df_filtrado_global['Fonte'].str.contains(st.session_state.busca.strip(), na=False)
-            )
-        df_filtrado_global = df_filtrado_global[mask]
+    # ══════════════════════════════════════════════════════════════════════════
+    # HELPERS DE RENDERIZAÇÃO (compartilhados entre Visão Macro e Categoria)
+    # ══════════════════════════════════════════════════════════════════════════
+    def render_execucao_orcamentaria(dados, titulo="Execução Orçamentária"):
+        orcado = dados['Orçado'].sum()
+        liq    = dados['Total_Liq'].sum() if 'Total_Liq' in dados.columns else 0.0
+        saldo  = dados['Saldo'].sum()
+        perc   = (liq / orcado * 100) if orcado > 0 else 0.0
+        c1, c2, c3, c4 = st.columns(4)
+        with c1: st.metric("Previsão (Orçado)",     formar_real(orcado))
+        with c2: st.metric("Saldo Disponível",       formar_real(saldo))
+        with c3: st.metric("Executado (Liquidado)",  formar_real(liq))
+        with c4: st.metric("% de Execução",          f"{perc:.2f}%".replace('.',','))
 
-    # ── TÍTULO ────────────────────────────────────────────────────────────────
-    st.title("📊 Cássia — Saúde")
-    st.markdown("---")
+        st.subheader("📈 Evolução Mensal da Execução (Liquidado)")
+        linhas = []
+        for m in meses_disp:
+            col = f"{m}_Liq"
+            linhas.append({"Mês": m, "Valor": dados[col].sum() if col in dados.columns else 0.0})
+        dfm = pd.DataFrame(linhas)
+        fig = px.line(dfm, x='Mês', y='Valor', markers=True,
+                      color_discrete_sequence=["#00CC96"])
+        fig.update_layout(yaxis_tickprefix='R$ ', yaxis_tickformat=',.2f', separators=',.',
+                          xaxis_title=None, yaxis_title="Liquidado (R$)", height=360)
+        fig.update_traces(hovertemplate="<b>%{x}</b><br>Liquidado: R$ %{y:,.2f}<extra></extra>")
+        st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
 
-    # ── MÉTRICAS GERAIS ───────────────────────────────────────────────────────
-    orcado_total = df_filtrado_global['Orçado'].sum()
-    liq_total    = df_filtrado_global['Total_Liq'].sum() if 'Total_Liq' in df_filtrado_global.columns else 0.0
-    saldo_total  = df_filtrado_global['Saldo'].sum()
-    perc_exec    = (liq_total / orcado_total * 100) if orcado_total > 0 else 0.0
+    def render_custeio_capital_pizza(dados):
+        st.subheader("📊 Custeio × Capital")
+        dn = dados.groupby('Natureza')['Total_Liq'].sum().reset_index()
+        for nat in ['Capital (Invest.)','Custeio (Manut.)']:
+            if nat not in dn['Natureza'].values:
+                dn = pd.concat([dn, pd.DataFrame({'Natureza':[nat],'Total_Liq':[0.0]})], ignore_index=True)
+        fig = px.pie(dn, values='Total_Liq', names='Natureza', hole=.4, color='Natureza',
+                     color_discrete_map={'Custeio (Manut.)':'#00CC96','Capital (Invest.)':'#EF553B'})
+        fig.update_layout(margin=dict(t=40,b=40,l=20,r=20), height=420, separators=',.',
+                          legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.05,
+                                      font=dict(size=15)))
+        fig.update_traces(textinfo='percent', textposition='inside',
+                          hovertemplate="<b>%{label}</b><br>Valor: R$ %{value:,.2f}<extra></extra>")
+        _, cc, _ = st.columns([1,2,1])
+        with cc: st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
 
-    c1, c2, c3, c4 = st.columns(4)
-    with c1: st.metric("Previsão (Orçado)",    formar_real(orcado_total))
-    with c2: st.metric("Saldo Disponível",      formar_real(saldo_total))
-    with c3: st.metric("Executado (Liquidado)", formar_real(liq_total))
-    with c4: st.metric("% de Execução",         f"{perc_exec:.2f}%".replace('.',','))
+    def render_folha_por_fonte(dados, titulo="💼 Folha de Pagamento por Fonte"):
+        st.subheader(titulo)
+        folha = dados[dados['Elemento'].isin(FOLHA_ELEMENTOS)]
+        total = folha['Total_Liq'].sum()
+        if total <= 0:
+            st.info("Sem despesas de folha liquidadas no período para este recorte.")
+            return
+        gf = folha.groupby('Fonte')['Total_Liq'].sum().reset_index()
+        gf = gf[gf['Total_Liq'] > 0].sort_values('Total_Liq', ascending=True)
+        gf['Rotulo'] = gf['Fonte'].apply(fonte_lbl)
+        fig = go.Figure(go.Bar(
+            x=gf['Total_Liq'], y=gf['Rotulo'], orientation='h',
+            marker_color=[cor_fonte(f) for f in gf['Fonte']],
+            text=[formar_real(v) for v in gf['Total_Liq']], textposition='outside',
+            hovertemplate="<b>%{y}</b><br>Folha Liquidada: R$ %{x:,.2f}<extra></extra>",
+        ))
+        fig.update_layout(height=90+55*len(gf), separators=',.',
+                          xaxis_title="Folha Liquidada (R$)", yaxis_title="",
+                          margin=dict(l=170, r=120, t=30, b=40),
+                          xaxis=dict(range=[0, gf['Total_Liq'].max()*1.22]))
+        st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
+        st.caption(f"Folha total do recorte: **{formar_real(total)}**")
 
-    # ── EVOLUÇÃO MENSAL ───────────────────────────────────────────────────────
-    st.subheader("📈 Evolução Mensal da Execução (Liquidado)")
-
-    meses_liq_map = {
-        'Janeiro': 'Janeiro_Liq', 'Fevereiro': 'Fevereiro_Liq', 'Março': 'Março_Liq',
-        'Abril': 'Abril_Liq', 'Maio': 'Maio_Liq', 'Junho': 'Junho_Liq',
-        'Julho': 'Julho_Liq', 'Agosto': 'Agosto_Liq', 'Setembro': 'Setembro_Liq',
-        'Outubro': 'Outubro_Liq', 'Novembro': 'Novembro_Liq', 'Dezembro': 'Dezembro_Liq',
-    }
-    mensal_dados = []
-    for mes, col in meses_liq_map.items():
-        val = df_filtrado_global[col].sum() if col in df_filtrado_global.columns else 0.0
-        mensal_dados.append({"Mês": mes, "Valor": val})
-    df_mensal = pd.DataFrame(mensal_dados)
-
-    fig_evolucao = px.line(df_mensal, x='Mês', y='Valor', markers=True,
-                           color_discrete_sequence=["#00CC96"])
-    fig_evolucao.update_layout(
-        yaxis_tickprefix='R$ ', yaxis_tickformat=',.2f', separators=',.',
-        xaxis_title=None, yaxis_title="Liquidado (R$)", height=380,
-    )
-    fig_evolucao.update_traces(
-        hovertemplate="<b>%{x}</b><br>Liquidado: R$ %{y:,.2f}<extra></extra>"
-    )
-    st.plotly_chart(fig_evolucao, use_container_width=True, config=CONFIG_PT)
-    st.markdown("---")
-
-    # ── DETALHAMENTO POR ELEMENTO ─────────────────────────────────────────────
-    st.markdown('<div id="foco_grafico"></div>', unsafe_allow_html=True)
-    st.subheader("📦 Detalhamento por Elemento")
-
-    st.markdown("""
-        <style>
-        @keyframes subirBarra {
-            from { clip-path: inset(100% 0 0 0); }
-            to   { clip-path: inset(0% 0 0 0); }
-        }
-        .js-plotly-plot .point path {
-            animation: subirBarra 0.8s cubic-bezier(0.25, 1, 0.5, 1) forwards;
-            clip-path: inset(100% 0 0 0);
-        }
-        </style>
-    """, unsafe_allow_html=True)
-
-    elementos_disponiveis = sorted([
-        str(x) for x in df_filtrado_global['Elemento'].dropna().unique()
-    ])
-
-    if elementos_disponiveis:
-        st.write("Selecione um elemento para visualizar o detalhamento:")
-        cols_botoes = st.columns(4)
-        for i, elemento in enumerate(elementos_disponiveis):
-            with cols_botoes[i % 4]:
-                if st.button(elemento, use_container_width=True, key=f"btn_detalhamento_fichas_{i}"):
-                    st.session_state['elemento_ativo'] = elemento
+    def render_detalhamento_elemento(dados, key_prefix="cat"):
+        st.markdown('<div id="foco_grafico"></div>', unsafe_allow_html=True)
+        st.subheader("📦 Detalhamento por Elemento")
+        elementos = sorted([str(x) for x in dados['Elemento'].dropna().unique()])
+        if not elementos:
+            st.info("Sem elementos para exibir.")
+            return
+        st.write("Selecione um elemento para visualizar o detalhamento das fichas:")
+        colsb = st.columns(4)
+        for i, ele in enumerate(elementos):
+            with colsb[i % 4]:
+                if st.button(ele, use_container_width=True, key=f"{key_prefix}_ele_{i}"):
+                    st.session_state['elemento_ativo'] = ele
                     st.rerun()
 
-        if 'elemento_ativo' in st.session_state:
+        if 'elemento_ativo' in st.session_state and st.session_state['elemento_ativo'] in elementos:
             ele = st.session_state['elemento_ativo']
-            scroll_id = random()
-            components.html(
-                f"""
-                <script id="scroll_{scroll_id}">
-                    var scroll = () => {{
-                        const el = window.parent.document.querySelector('.st-key-detalhamento-fichas');
-                        if (el) el.scrollIntoView({{ behavior: "smooth", block: "center" }});
-                    }};
-                    setTimeout(scroll, 150);
-                </script>
-                """,
-                height=0,
-            )
-
-            df_detalhe = (
-                df_filtrado_global[df_filtrado_global['Elemento'] == ele]
-                .sort_values('Orçado', ascending=False)
-                .copy()
-            )
-
+            sid = random()
+            components.html(f"""<script id="scroll_{sid}">
+                var s=()=>{{const el=window.parent.document.querySelector('.st-key-detalhamento-fichas');
+                if(el)el.scrollIntoView({{behavior:"smooth",block:"center"}});}};setTimeout(s,150);
+                </script>""", height=0)
+            dd = dados[dados['Elemento'] == ele].sort_values('Orçado', ascending=False).copy()
             st.subheader(f"📊 Detalhamento de Fichas: {ele}")
-
-            lista_elementos = [remover_acentos(e) for e in df_raw['Elemento'].unique() if pd.notna(e)]
-            busca_limpa = remover_acentos(st.session_state.busca)
-            label_hover = (
-                "Categoria" if st.session_state.busca and busca_limpa in lista_elementos
-                else ("Elemento" if st.session_state.busca else "Categoria")
-            )
-
-            fig_detalhe = px.bar(
-                df_detalhe, x='Ficha', y='Orçado',
-                color_discrete_sequence=["#00CC96"],
-                custom_data=[label_hover, 'Fonte']
-            )
-            fig_detalhe.update_traces(
-                hovertemplate=(
-                    f"<b>{label_hover}:</b> %{{customdata[0]}}<br>"
-                    "<b>Fonte:</b> %{customdata[1]}<br>"
-                    "<b>Valor:</b> R$ %{y:,.2f}<extra></extra>"
-                ),
-                text=df_detalhe['Orçado'].apply(formar_real),
-                textposition='outside',
-                cliponaxis=False,
-                width=0.8 if len(df_detalhe) < 12 else 0.5
-            )
-            fig_detalhe.update_layout(
-                xaxis_type='category', height=550, separators=',.',
-                yaxis=dict(range=[0, df_detalhe['Orçado'].max() * 1.30]),
-                margin=dict(t=80, b=50, l=50, r=50)
-            )
-            st.plotly_chart(
-                fig_detalhe, use_container_width=True, theme=None,
-                config=CONFIG_PT, key="detalhamento-fichas"
-            )
-
-            if st.button("⬅️ Voltar para Visão Geral"):
+            fig = px.bar(dd, x='Ficha', y='Orçado', color_discrete_sequence=["#00CC96"],
+                         custom_data=['Categoria','Fonte'])
+            fig.update_traces(
+                hovertemplate=("<b>Categoria:</b> %{customdata[0]}<br>"
+                               "<b>Fonte:</b> %{customdata[1]}<br>"
+                               "<b>Valor:</b> R$ %{y:,.2f}<extra></extra>"),
+                text=dd['Orçado'].apply(formar_real), textposition='outside',
+                cliponaxis=False, width=0.8 if len(dd) < 12 else 0.5)
+            fig.update_layout(xaxis_type='category', height=520, separators=',.',
+                              yaxis=dict(range=[0, dd['Orçado'].max()*1.30]),
+                              margin=dict(t=80,b=50,l=50,r=50))
+            st.plotly_chart(fig, use_container_width=True, theme=None,
+                            config=CONFIG_PT, key="detalhamento-fichas")
+            if st.button("⬅️ Voltar para Visão Geral", key=f"{key_prefix}_voltar"):
                 del st.session_state['elemento_ativo']
                 st.rerun()
 
-    st.markdown("---")
+    # ══════════════════════════════════════════════════════════════════════════
+    # MODO 1 — VISÃO MACRO
+    # ══════════════════════════════════════════════════════════════════════════
+    if st.session_state.modo == 'Visão Macro':
+        st.title("🌐 Cássia — Saúde · Visão Macro")
+        st.caption("Análise dos recursos totais da Saúde no período "
+                   f"({meses_disp[0]}–{meses_disp[-1]}).")
+        st.markdown("---")
 
-    # ── CUSTEIO x CAPITAL ─────────────────────────────────────────────────────
-    st.subheader("📊 Custeio × Capital")
+        # 2.1 — Execução orçamentária (mantida)
+        render_execucao_orcamentaria(df_raw)
+        st.markdown("---")
 
-    df_natureza = (
-        df_filtrado_global.groupby('Natureza')['Total_Liq']
-        .sum().reset_index()
-    )
-    for nat in ['Capital (Invest.)','Custeio (Manut.)']:
-        if nat not in df_natureza['Natureza'].values:
-            df_natureza = pd.concat(
-                [df_natureza, pd.DataFrame({'Natureza':[nat],'Total_Liq':[0.0]})],
-                ignore_index=True
-            )
+        # 2.3 — Análise dos 15% (mínimo constitucional em saúde, sem deduções)
+        st.subheader("🎯 Aplicação Mínima em Saúde (15%)")
+        if df_r is not None and df_df is not None:
+            base_15 = soma_cols(df_r[df_r['Categoria'].isin(['Impostos','Cota-Parte'])], meses_disp)
+            desp_1500 = soma_cols(
+                df_df[(df_df['Fonte'] == '1500') & (df_df['Tipo'] == 'Liquidado')], meses_disp)
+            indice_15 = (desp_1500 / base_15 * 100) if base_15 > 0 else 0.0
+            meta_valor = base_15 * 0.15
 
-    fig_natureza = px.pie(
-        df_natureza, values='Total_Liq', names='Natureza', hole=.4,
-        color='Natureza',
-        color_discrete_map={'Custeio (Manut.)':'#00CC96','Capital (Invest.)':'#EF553B'}
-    )
-    fig_natureza.update_layout(
-        margin=dict(t=50, b=50, l=20, r=20), height=450,
-        showlegend=True, separators=',.',
-        legend=dict(orientation="v", yanchor="middle", y=0.5,
-                    xanchor="left", x=1.05, font=dict(size=16))
-    )
-    fig_natureza.update_traces(
-        textinfo='percent', textposition='inside',
-        hovertemplate="<b>Natureza:</b> %{label}<br><b>Valor Total:</b> R$ %{value:,.2f}<extra></extra>"
-    )
-    _, col_central_1, _ = st.columns([1,2,1])
-    with col_central_1:
-        st.plotly_chart(fig_natureza, use_container_width=True, config=CONFIG_PT)
+            k1, k2, k3, k4 = st.columns(4)
+            with k1: st.metric("Receita Base (Impostos + Cota-Parte)", formar_real(base_15))
+            with k2: st.metric("Aplicado em Saúde (Fonte 1500)", formar_real(desp_1500))
+            with k3: st.metric("Índice de Aplicação",
+                               f"{indice_15:.2f}%".replace('.',','),
+                               delta=f"{indice_15-15:.2f} p.p. vs 15%".replace('.',','),
+                               delta_color=("normal" if indice_15 >= 15 else "inverse"))
+            with k4: st.metric("Mínimo Exigido (15%)", formar_real(meta_valor))
 
-    st.markdown("---")
+            fig15 = go.Figure()
+            fig15.add_bar(x=['Aplicado em Saúde<br>(Fonte 1500)'], y=[desp_1500],
+                          marker_color=('#27ae60' if indice_15 >= 15 else '#e74c3c'),
+                          text=[formar_real(desp_1500)], textposition='outside',
+                          hovertemplate="Aplicado: R$ %{y:,.2f}<extra></extra>", width=0.5)
+            fig15.add_hline(y=meta_valor, line_dash="dash", line_color="#003366",
+                            annotation_text=f"Meta 15% = {formar_real(meta_valor)}",
+                            annotation_position="top left")
+            fig15.update_layout(height=380, separators=',.', yaxis_title="R$",
+                                yaxis=dict(range=[0, max(desp_1500, meta_valor)*1.25]),
+                                margin=dict(t=40,b=30,l=40,r=40), showlegend=False)
+            st.plotly_chart(fig15, use_container_width=True, config=CONFIG_PT)
+            if indice_15 >= 15:
+                st.success(f"✔ O município aplicou **{indice_15:.2f}%** das receitas de impostos e "
+                           f"transferências em Ações e Serviços Públicos de Saúde (ASPS), acima do "
+                           f"mínimo constitucional de 15%.".replace('.',',',1))
+            else:
+                st.error(f"⚠ Aplicação de **{indice_15:.2f}%**, abaixo do mínimo constitucional de "
+                         f"15% (ASPS).".replace('.',',',1))
+            st.caption("Base legal: CF/1988 art. 198 §2º e §3º; LC nº 141/2012 (define ASPS e o "
+                       "mínimo de 15%). Cálculo sem deduções: despesa própria de saúde (fonte 1500) "
+                       "sobre a receita de impostos e cota-parte.")
+        else:
+            st.info("Dados de receitas/despesas indisponíveis para o cálculo dos 15%.")
+        st.markdown("---")
 
-    # ── % DE EXECUÇÃO POR CATEGORIA ───────────────────────────────────────────
-    st.subheader("🎯 % de Execução por Categoria")
+        # 2.4 — Receitas Federais e Estaduais por categoria
+        st.subheader("🏛️ Receitas Vinculadas — Federais e Estaduais por Categoria")
+        if df_rv is not None and not df_rv.empty:
+            grv = (df_rv.assign(V=df_rv[[m for m in meses_disp if m in df_rv.columns]].sum(axis=1))
+                        .groupby(['Categoria','Origem'])['V'].sum().reset_index())
+            grv = grv[grv['V'] > 0]
+            ordem_cat = (grv.groupby('Categoria')['V'].sum()
+                         .sort_values(ascending=False).index.tolist())
+            fig_rv = px.bar(grv, x='Categoria', y='V', color='Origem', barmode='group',
+                            color_discrete_map={'Federal':C_FEDERAL,'Estadual':C_ESTADUAL},
+                            category_orders={'Categoria': ordem_cat})
+            fig_rv.update_traces(
+                hovertemplate="<b>%{x}</b><br><b>%{data.name}:</b> R$ %{y:,.2f}<extra></extra>")
+            fig_rv.update_layout(height=430, separators=',.', xaxis_title="",
+                                 yaxis_title="Receita (R$)", legend_title="Origem",
+                                 margin=dict(t=30,b=40))
+            st.plotly_chart(fig_rv, use_container_width=True, config=CONFIG_PT)
+            tot_fed = grv[grv['Origem']=='Federal']['V'].sum()
+            tot_est = grv[grv['Origem']=='Estadual']['V'].sum()
+            cfed, cest, ctot = st.columns(3)
+            with cfed: st.metric("Total Federal", formar_real(tot_fed))
+            with cest: st.metric("Total Estadual", formar_real(tot_est))
+            with ctot: st.metric("Total Vinculado", formar_real(tot_fed+tot_est))
+        else:
+            st.info("Arquivo de Receitas Vinculadas (Cássia_RV) indisponível.")
+        st.markdown("---")
 
-    df_exec_cat = (
-        df_filtrado_global.groupby('Categoria')
-        .agg(Orçado=('Orçado','sum'), Liquidado=('Total_Liq','sum'))
-        .reset_index()
-    )
-    df_exec_cat['Perc'] = (
-        df_exec_cat['Liquidado'] / df_exec_cat['Orçado'] * 100
-    ).fillna(0)
-    df_exec_cat = df_exec_cat.sort_values('Perc', ascending=True)
+        # 2.5 — Custeio × Capital detalhado por fonte
+        st.subheader("📊 Custeio × Capital — Detalhado por Fonte")
+        gcc = (df_raw.groupby(['Fonte','Natureza'])['Total_Liq'].sum().reset_index())
+        gcc = gcc[gcc['Total_Liq'] > 0].copy()
+        gcc['Rotulo'] = gcc['Fonte'].apply(fonte_lbl)
+        ordem_f = (gcc.groupby('Rotulo')['Total_Liq'].sum()
+                   .sort_values(ascending=False).index.tolist())
+        fig_cc = px.bar(gcc, x='Rotulo', y='Total_Liq', color='Natureza',
+                        barmode='stack', category_orders={'Rotulo': ordem_f},
+                        color_discrete_map={'Custeio (Manut.)':'#00CC96',
+                                            'Capital (Invest.)':'#EF553B'})
+        fig_cc.update_traces(
+            hovertemplate="<b>%{x}</b><br><b>%{data.name}:</b> R$ %{y:,.2f}<extra></extra>")
+        fig_cc.update_layout(height=440, separators=',.', xaxis_title="",
+                             yaxis_title="Liquidado (R$)", legend_title="Natureza",
+                             margin=dict(t=30,b=90), xaxis_tickangle=-25)
+        st.plotly_chart(fig_cc, use_container_width=True, config=CONFIG_PT)
+        tc = df_raw[df_raw['Natureza']=='Custeio (Manut.)']['Total_Liq'].sum()
+        tk = df_raw[df_raw['Natureza']=='Capital (Invest.)']['Total_Liq'].sum()
+        cc1, cc2 = st.columns(2)
+        with cc1: st.metric("Total Custeio", formar_real(tc))
+        with cc2: st.metric("Total Capital", formar_real(tk))
+        st.markdown("---")
 
-    fig_exec = px.bar(
-        df_exec_cat, x='Perc', y='Categoria', orientation='h',
-        text='Perc', color='Perc', color_continuous_scale='Greens'
-    )
-    fig_exec.update_traces(
-        texttemplate='%{text:.1f}%', textposition='outside',
-        hovertemplate="<b>Categoria:</b> %{y}<br><b>Execução:</b> %{x:.2f}%<extra></extra>"
-    )
-    fig_exec.update_layout(
-        xaxis_title="Liquidado (%)", yaxis_title="",
-        coloraxis_showscale=False, height=400,
-        separators=',.',
-        margin=dict(l=200),
-        xaxis=dict(range=[0, 120])
-    )
-    st.plotly_chart(fig_exec, use_container_width=True, config=CONFIG_PT)
+        # 2.8 — Total Investido em Saúde (pizza por categoria) — mantido
+        st.subheader(f"🏥 Total Investido em Saúde — Liquidado ({meses_disp[0]}–{meses_disp[-1]})")
+        NOME_CAT = {'Secretaria':'Administração','Atenção Primária':'Atenção Primária',
+                    'MAC':'Ambulatorial e Especialidades (MAC)','Farmácia':'Farmácia',
+                    'Vigilância':'Vigilância'}
+        CORES_CAT = {'Administração':'#f39c12','Atenção Primária':'#4A90D9',
+                     'Ambulatorial e Especialidades (MAC)':'#1a3a6b','Farmácia':'#27ae60',
+                     'Vigilância':'#e74c3c'}
+        dpz = df_raw.groupby('Categoria')['Total_Liq'].sum().reset_index()
+        dpz['Label'] = dpz['Categoria'].map(NOME_CAT).fillna(dpz['Categoria'])
+        dpz = dpz[dpz['Total_Liq'] > 0]
+        total_geral = dpz['Total_Liq'].sum()
+        fig_pz = px.pie(dpz, values='Total_Liq', names='Label', hole=0.0,
+                        color='Label', color_discrete_map=CORES_CAT)
+        fig_pz.update_traces(
+            textinfo='label+percent', textposition='outside', pull=[0.03]*len(dpz),
+            hovertemplate=("<b>%{label}</b><br>Liquidado: <b>R$ %{value:,.2f}</b><br>"
+                           "Participação: <b>%{percent}</b><extra></extra>"),
+            hoverlabel=dict(bgcolor="rgba(0,0,0,0.85)", font_size=13, font_color="white"))
+        fig_pz.update_layout(
+            title=dict(text=f"Total Liquidado: <b>{formar_real(total_geral)}</b>",
+                       x=0.5, xanchor='center', font=dict(size=14)),
+            showlegend=True, height=480, separators=',.',
+            legend=dict(orientation="v", yanchor="middle", y=0.8, xanchor="left", x=1.02,
+                        font=dict(size=13), itemclick="toggle", itemdoubleclick="toggleothers"),
+            margin=dict(t=60,b=40,l=20,r=180))
+        _, cpz, _ = st.columns([0.5,3,0.5])
+        with cpz: st.plotly_chart(fig_pz, use_container_width=True, config=CONFIG_PT)
+        st.markdown("---")
 
-    st.markdown("---")
+        # 2.9 — Folha Total por fonte
+        render_folha_por_fonte(df_raw, "💼 Folha de Pagamento Total — por Fonte")
 
-    # ── ORÇADO × EXECUTADO POR CATEGORIA ──────────────────────────────────────
-    st.subheader("💰 Orçado × Executado por Categoria")
+    # ══════════════════════════════════════════════════════════════════════════
+    # MODO 2 — ANÁLISE POR CATEGORIA
+    # ══════════════════════════════════════════════════════════════════════════
+    else:
+        cat = st.session_state.modo
+        df_cat = df_raw[df_raw['Categoria'] == cat].copy()
+        st.title(f"📂 {cat} — Saúde")
+        st.caption(f"Análise da categoria no período ({meses_disp[0]}–{meses_disp[-1]}).")
+        st.markdown("---")
 
-    df_comp_cat = (
-        df_filtrado_global.groupby('Categoria')
-        .agg(Orçado=('Orçado','sum'), Liquidado=('Total_Liq','sum'))
-        .reset_index()
-    )
-    ordem_categorias = df_comp_cat.sort_values('Orçado', ascending=False)['Categoria'].tolist()
-    df_melted = df_comp_cat.melt(
-        id_vars='Categoria', value_vars=['Orçado','Liquidado'],
-        var_name='Tipo', value_name='Valor'
-    )
+        # 3.1 — Execução orçamentária da categoria (mantida)
+        render_execucao_orcamentaria(df_cat)
+        st.markdown("---")
 
-    fig_comp = px.bar(
-        df_melted, x='Categoria', y='Valor', color='Tipo',
-        barmode='group',
-        color_discrete_map={'Orçado':'#2196F3','Liquidado':'#00CC96'},
-        category_orders={'Categoria': ordem_categorias},
-        text='Valor'
-    )
-    fig_comp.update_traces(
-        texttemplate='R$ %{y:,.2f}', textposition='outside',
-        hovertemplate="<b>Categoria:</b> %{x}<br><b>%{data.name}:</b> R$ %{y:,.2f}<extra></extra>"
-    )
-    fig_comp.update_layout(
-        xaxis_title="", yaxis_title="Valor (R$)", height=500,
-        legend_title="Legenda", separators=',.',
-        yaxis=dict(range=[0, df_comp_cat['Orçado'].max() * 1.25])
-    )
-    st.plotly_chart(fig_comp, use_container_width=True, config=CONFIG_PT)
+        # 3.2 — Receitas × Despesas mensal — Vinculados Federal/Estadual (modelo FUNDEB)
+        st.subheader("🔄 Receitas × Despesas Mensal — Recursos Vinculados (Federal/Estadual)")
+        rv_cat = df_rv[df_rv['Categoria'] == cat] if df_rv is not None else None
+        desp_vinc = df_cat[df_cat['Fonte'] != '1500']
+        tem_rec = rv_cat is not None and not rv_cat.empty
+        tem_desp = not desp_vinc.empty and desp_vinc[cols_liq].sum().sum() > 0
+        if tem_rec or tem_desp:
+            fig_rd = go.Figure()
+            # Receitas por origem (empilhadas), offsetgroup 'Receita'
+            if tem_rec:
+                for origem, cor in [('Federal', C_FEDERAL), ('Estadual', C_ESTADUAL)]:
+                    sub = rv_cat[rv_cat['Origem'] == origem]
+                    vals = [sub[m].sum() if m in sub.columns else 0.0 for m in meses_disp]
+                    if sum(vals) <= 0: continue
+                    fig_rd.add_bar(x=meses_disp, y=vals, name=f"Receita {origem}",
+                                   marker_color=cor, offsetgroup='Receita', legendgroup='rec',
+                                   hovertemplate=(f"<b>%{{x}}</b><br>Receita {origem}: "
+                                                  "R$ %{y:,.2f}<extra></extra>"))
+            # Despesas por fonte (empilhadas), offsetgroup 'Despesa'
+            if tem_desp:
+                for fonte in sorted(desp_vinc['Fonte'].unique()):
+                    sub = desp_vinc[desp_vinc['Fonte'] == fonte]
+                    vals = [sub[f"{m}_Liq"].sum() if f"{m}_Liq" in sub.columns else 0.0
+                            for m in meses_disp]
+                    if sum(vals) <= 0: continue
+                    fig_rd.add_bar(x=meses_disp, y=vals, name=fonte_lbl(fonte),
+                                   marker_color=cor_fonte(fonte), offsetgroup='Despesa',
+                                   legendgroup='desp',
+                                   hovertemplate=(f"<b>%{{x}}</b><br>{fonte_lbl(fonte)} (desp.): "
+                                                  "R$ %{y:,.2f}<extra></extra>"))
+            fig_rd.update_layout(barmode='relative', height=470, separators=',.',
+                                 yaxis_title="R$", xaxis_title="",
+                                 legend_title="Receitas (cor) × Despesas (fonte)",
+                                 margin=dict(t=30,b=40))
+            st.plotly_chart(fig_rd, use_container_width=True, config=CONFIG_PT)
+            st.caption("Barra à esquerda de cada mês = **Receitas Vinculadas** (por origem); "
+                       "barra à direita = **Despesas** liquidadas (por fonte). Fonte própria (1500) "
+                       "não entra neste comparativo de recursos vinculados.")
+        else:
+            st.info("Sem receitas vinculadas ou despesas de fontes vinculadas para esta categoria "
+                    "no período.")
+        st.markdown("---")
 
-    st.markdown("---")
+        # 3.5 — Custeio × Capital ANTES do detalhamento de fichas
+        render_custeio_capital_pizza(df_cat)
+        st.markdown("---")
 
-    # ── TOTAL INVESTIDO EM SAÚDE — PIZZA POR CATEGORIA ───────────────────────
-    st.subheader("🏥 Total Investido em Saúde — Valor Liquidado (Janeiro a Março)")
+        # 3.3 / 3.4 — Detalhamento por elemento + fichas
+        render_detalhamento_elemento(df_cat, key_prefix=f"cat_{remover_acentos(cat)}")
+        st.markdown("---")
 
-    NOME_CATEGORIA = {
-        'Secretaria':      'Administração',
-        'Atenção Primária':'Atenção Primária',
-        'MAC':             'Ambulatorial e Especialidades (MAC)',
-        'Farmácia':        'Farmácia',
-        'Vigilância':      'Vigilância',
-    }
-    CORES_CATEGORIA = {
-        'Administração':                       '#f39c12',
-        'Atenção Primária':                    '#4A90D9',
-        'Ambulatorial e Especialidades (MAC)': '#1a3a6b',
-        'Farmácia':                            '#27ae60',
-        'Vigilância':                          '#e74c3c',
-    }
-
-    df_pizza_cat = (
-        df_raw
-        .groupby('Categoria')['Total_Liq']
-        .sum()
-        .reset_index()
-    )
-    df_pizza_cat['Categoria_Label'] = df_pizza_cat['Categoria'].map(NOME_CATEGORIA).fillna(df_pizza_cat['Categoria'])
-    df_pizza_cat = df_pizza_cat[df_pizza_cat['Total_Liq'] > 0]
-    total_liq_geral = df_pizza_cat['Total_Liq'].sum()
-
-    fig_pizza_cat = px.pie(
-        df_pizza_cat,
-        values='Total_Liq',
-        names='Categoria_Label',
-        hole=0.0,
-        color='Categoria_Label',
-        color_discrete_map=CORES_CATEGORIA,
-    )
-    fig_pizza_cat.update_traces(
-        textinfo='label+percent',
-        textposition='outside',
-        pull=[0.03] * len(df_pizza_cat),
-        hovertemplate=(
-            "<span style='color:white;'>"
-            "<b>%{label}</b><br>"
-            "Liquidado: <b>R$ %{value:,.2f}</b><br>"
-            "Participação: <b>%{percent}</b>"
-            "</span><extra></extra>"
-        ),
-        hoverlabel=dict(
-            bgcolor="rgba(0,0,0,0.85)",
-            font_size=13,
-            font_family="Arial",
-            font_color="white"
-        ),
-    )
-    fig_pizza_cat.update_layout(
-        title=dict(
-            text=f"Total Liquidado: <b>R$ {total_liq_geral:,.2f}".replace(',','X').replace('.',',').replace('X','.') + "</b>",
-            x=0.5, xanchor='center',
-            font=dict(size=14)
-        ),
-        showlegend=True,
-        legend=dict(
-            orientation="v",
-            yanchor="middle", y=0.8,
-            xanchor="left",   x=1.02,
-            font=dict(size=13),
-            itemclick="toggle",
-            itemdoubleclick="toggleothers",
-        ),
-        height=480,
-        separators=',.',
-        margin=dict(t=60, b=40, l=20, r=180),
-        transition={'duration': 800, 'easing': 'cubic-in-out'},
-    )
-
-    _, col_pizza_cat, _ = st.columns([0.5, 3, 0.5])
-    with col_pizza_cat:
-        st.plotly_chart(fig_pizza_cat, use_container_width=True, config=CONFIG_PT)
-
-    st.markdown("---")
-
-    # ── RELATÓRIO DETALHADO ────────────────────────────────────────────────────
-    st.subheader("📋 Relatório Detalhado")
-
-    df_relatorio = df_filtrado_global.copy()
-    df_relatorio['Orçado_F'] = df_relatorio['Orçado'].apply(formar_real)
-    df_relatorio['Saldo_F']  = df_relatorio['Saldo'].apply(formar_real)
-    df_relatorio['Liq_F']    = df_relatorio['Total_Liq'].apply(formar_real)
-
-    st.data_editor(
-        df_relatorio[['Categoria','Ficha','Elemento','Fonte','Orçado_F','Liq_F','Saldo_F']],
-        use_container_width=True, hide_index=True, disabled=True,
-        column_config={
-            "Orçado_F":  "Orçado",
-            "Liq_F":     "Liquidado",
-            "Saldo_F":   "Saldo",
-            "Elemento":  st.column_config.TextColumn("Elemento", width="large"),
-            "Ficha":     st.column_config.TextColumn("Ficha"),
-            "Fonte":     st.column_config.TextColumn("Fonte"),
-            "Categoria": st.column_config.TextColumn("Categoria"),
-        },
-    )
+        # 3.8 — Folha por fonte (categoria)
+        render_folha_por_fonte(df_cat, "💼 Folha de Pagamento da Categoria — por Fonte")
 
 else:
     st.error("Arquivos de dados não encontrados! Verifique a pasta 'zSaúde'.")
