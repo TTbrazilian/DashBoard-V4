@@ -42,7 +42,11 @@ CONFIG_PT = {'displaylogo': False, 'showTips': False}
 # fallback para versões antigas.
 def _html_iframe(html, height=0, scrolling=False):
     if hasattr(st, "iframe"):
-        st.iframe(html, height=height)
+        # st.iframe (Streamlit >= 1.56) NÃO aceita height=0 (usado aqui para injeção
+        # invisível de JS). Altura precisa ser inteiro positivo ou "stretch"/"content".
+        # Usamos "content" (auto-ajuste, colapsa para ~0) quando height não é positivo.
+        h = height if isinstance(height, int) and height > 0 else "content"
+        st.iframe(html, height=h)
     else:
         components.html(html, height=height, scrolling=scrolling)
 

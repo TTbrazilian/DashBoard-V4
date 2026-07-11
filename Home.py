@@ -1,4 +1,17 @@
 import streamlit as st
+import streamlit as st
+
+# Escudo global iG2P: st.iframe (Streamlit >= 1.56) não aceita height=0/None.
+# Coerção para "content" evita StreamlitInvalidHeightError em qualquer página.
+if hasattr(st, "iframe") and not getattr(st, "_ig2p_iframe_patched", False):
+    _orig_iframe = st.iframe
+    def _safe_iframe(src, *a, **k):
+        h = k.get("height", None)
+        if not (isinstance(h, int) and h > 0) and h not in ("stretch", "content"):
+            k["height"] = "content"
+        return _orig_iframe(src, *a, **k)
+    st.iframe = _safe_iframe
+    st._ig2p_iframe_patched = True
 import os
 import base64
 import math
