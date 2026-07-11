@@ -36,6 +36,16 @@ st.markdown("""
 pio.templates.default = "plotly_white"
 CONFIG_PT = {'displaylogo': False, 'showTips': False}
 
+# Compatibilidade: st.components.v1.html (components.html) foi descontinuado na
+# versão 1.56 do Streamlit em favor de st.iframe (que também embute string HTML
+# num iframe e executa o JavaScript). Usa st.iframe quando disponível e mantém
+# fallback para versões antigas.
+def _html_iframe(html, height=0, scrolling=False):
+    if hasattr(st, "iframe"):
+        st.iframe(html, height=height)
+    else:
+        components.html(html, height=height, scrolling=scrolling)
+
 MESES_ORDEM = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho',
                'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
 
@@ -328,7 +338,7 @@ if df_raw is not None:
             "})()</script>"
         )
 
-    components.html(
+    _html_iframe(
         _js_sidebar_universal(
             _ler_logo("LOGOTIPO IG2P - OFICIAL - BRANCO.png"),
             _ler_logo("LOGOTIPO IG2P - OFICIAL.png"),
@@ -432,7 +442,7 @@ if df_raw is not None:
         if 'elemento_ativo' in st.session_state and st.session_state['elemento_ativo'] in elementos:
             ele = st.session_state['elemento_ativo']
             sid = random()
-            components.html(f"""<script id="scroll_{sid}">
+            _html_iframe(f"""<script id="scroll_{sid}">
                 var s=()=>{{const el=window.parent.document.querySelector('.st-key-detalhamento-fichas');
                 if(el)el.scrollIntoView({{behavior:"smooth",block:"center"}});}};setTimeout(s,150);
                 </script>""", height=0)
