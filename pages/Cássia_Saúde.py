@@ -48,16 +48,34 @@ FONTE_LABEL = {
 }
 def fonte_lbl(f): return FONTE_LABEL.get(str(f).strip(), f"Fonte {f}")
 
-# Paleta para despesas por fonte
+# Paleta QUENTE para despesas por fonte (distinta dos azuis usados nas receitas)
 CORES_FONTE = {
-    '1500':'#7f8c8d','1600':'#2E86C1','1601':'#154360','1602':'#8e44ad','1603':'#9b59b6',
-    '1604':'#16a085','1605':'#f39c12','1621':'#27ae60','1631':'#2980b9','1659':'#1abc9c',
-    '2621':'#e67e22','1706':'#c0392b',
+    '1500':'#7f8c8d','1600':'#e67e22','1601':'#8e44ad','1602':'#c0392b','1603':'#9b59b6',
+    '1604':'#16a085','1605':'#f1c40f','1621':'#c0392b','1631':'#d35400','1659':'#27ae60',
+    '2621':'#e74c3c','1706':'#a93226',
 }
 def cor_fonte(f): return CORES_FONTE.get(str(f).strip(), '#95a5a6')
 
-C_FEDERAL  = '#2E86C1'
-C_ESTADUAL = '#28B463'
+# Receitas em AZUL (contraste com as despesas quentes)
+C_FEDERAL  = '#003366'
+C_ESTADUAL = '#2E86C1'
+
+# Cores do bloco 15% (mesmas da Educação: receita azul, despesa vermelha, meta laranja)
+C_15_RECEITA = '#003366'
+C_15_DESPESA = '#860000'
+C_META       = '#f39c12'
+
+# Grupos de fonte para o comparativo de vinculados (Visão Macro)
+GRUPO_DESP_VINC = {
+    'Federal Custeio': ['1600','1604','1605'],
+    'Federal Capital': ['1601'],
+    'Estadual':        ['1621'],
+}
+COR_GRUPO_DESP = {
+    'Federal Custeio': '#e67e22',
+    'Federal Capital': '#8e44ad',
+    'Estadual':        '#c0392b',
+}
 
 # Elementos de folha/pessoal (ajustável). Usados em "Folha por Fonte".
 FOLHA_ELEMENTOS = [
@@ -200,6 +218,7 @@ def _detectar_meses(df_f, df_dfonte):
             out.append(m)
     return out or ['Janeiro','Fevereiro','Março','Abril']
 
+
 # ══════════════════════════════════════════════════════════════════════════════
 # INTERFACE
 # ══════════════════════════════════════════════════════════════════════════════
@@ -209,7 +228,6 @@ if df_raw is not None:
     cols_liq = [f"{m}_Liq" for m in meses_disp if f"{m}_Liq" in df_raw.columns]
     cats = sorted(df_raw['Categoria'].dropna().unique())
 
-    # ── ESTADO / NAVEGAÇÃO ────────────────────────────────────────────────────
     if 'modo' not in st.session_state:
         st.session_state.modo = 'Visão Macro'
 
@@ -319,9 +337,19 @@ if df_raw is not None:
     )
 
     # ══════════════════════════════════════════════════════════════════════════
-    # HELPERS DE RENDERIZAÇÃO (compartilhados entre Visão Macro e Categoria)
+    # HELPERS DE RENDERIZAÇÃO
     # ══════════════════════════════════════════════════════════════════════════
-    def render_execucao_orcamentaria(dados, titulo="Execução Orçamentária"):
+    def _fig_evolucao(dados, cor="#00CC96"):
+        linhas = [{"Mês": m, "Valor": dados[f"{m}_Liq"].sum() if f"{m}_Liq" in dados.columns else 0.0}
+                  for m in meses_disp]
+        dfm = pd.DataFrame(linhas)
+        fig = px.line(dfm, x='Mês', y='Valor', markers=True, color_discrete_sequence=[cor])
+        fig.update_layout(yaxis_tickprefix='R$ ', yaxis_tickformat=',.2f', separators=',.',
+                          xaxis_title=None, yaxis_title="Liquidado (R$)", height=360)
+        fig.update_traces(hovertemplate="<b>%{x}</b><br>Liquidado: R$ %{y:,.2f}<extra></extra>")
+        return fig
+
+    def render_execucao_orcamentaria(dados):
         orcado = dados['Orçado'].sum()
         liq    = dados['Total_Liq'].sum() if 'Total_Liq' in dados.columns else 0.0
         saldo  = dados['Saldo'].sum()
@@ -331,26 +359,17 @@ if df_raw is not None:
         with c2: st.metric("Saldo Disponível",       formar_real(saldo))
         with c3: st.metric("Executado (Liquidado)",  formar_real(liq))
         with c4: st.metric("% de Execução",          f"{perc:.2f}%".replace('.',','))
-
         st.subheader("📈 Evolução Mensal da Execução (Liquidado)")
-        linhas = []
-        for m in meses_disp:
-            col = f"{m}_Liq"
-            linhas.append({"Mês": m, "Valor": dados[col].sum() if col in dados.columns else 0.0})
-        dfm = pd.DataFrame(linhas)
-        fig = px.line(dfm, x='Mês', y='Valor', markers=True,
-                      color_discrete_sequence=["#00CC96"])
-        fig.update_layout(yaxis_tickprefix='R$ ', yaxis_tickformat=',.2f', separators=',.',
-                          xaxis_title=None, yaxis_title="Liquidado (R$)", height=360)
-        fig.update_traces(hovertemplate="<b>%{x}</b><br>Liquidado: R$ %{y:,.2f}<extra></extra>")
-        st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
+        st.plotly_chart(_fig_evolucao(dados), use_container_width=True, config=CONFIG_PT)
 
     def render_custeio_capital_pizza(dados):
         st.subheader("📊 Custeio × Capital")
-        dn = dados.groupby('Natureza')['Total_Liq'].sum().reset_index()
-        for nat in ['Capital (Invest.)','Custeio (Manut.)']:
-            if nat not in dn['Natureza'].values:
-                dn = pd.concat([dn, pd.DataFrame({'Natureza':[nat],'Total_Liq':[0.0]})], ignore_index=True)
+        tc = dados[dados['Natureza']=='Custeio (Manut.)']['Total_Liq'].sum()
+        tk = dados[dados['Natureza']=='Capital (Invest.)']['Total_Liq'].sum()
+        m1, m2 = st.columns(2)
+        with m1: st.metric("Total Custeio", formar_real(tc))
+        with m2: st.metric("Total Capital", formar_real(tk))
+        dn = pd.DataFrame({'Natureza':['Custeio (Manut.)','Capital (Invest.)'],'Total_Liq':[tc,tk]})
         fig = px.pie(dn, values='Total_Liq', names='Natureza', hole=.4, color='Natureza',
                      color_discrete_map={'Custeio (Manut.)':'#00CC96','Capital (Invest.)':'#EF553B'})
         fig.update_layout(margin=dict(t=40,b=40,l=20,r=20), height=420, separators=',.',
@@ -361,28 +380,39 @@ if df_raw is not None:
         _, cc, _ = st.columns([1,2,1])
         with cc: st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
 
-    def render_folha_por_fonte(dados, titulo="💼 Folha de Pagamento por Fonte"):
+    def _pizza_por_fonte(dados_valor_por_fonte, titulo_total):
+        """Recebe DataFrame com colunas ['Fonte','Valor'] (>0) e desenha pizza por fonte."""
+        d = dados_valor_por_fonte[dados_valor_por_fonte['Valor'] > 0].copy()
+        total = d['Valor'].sum()
+        st.metric(titulo_total, formar_real(total))
+        if d.empty:
+            st.info("Sem valores para exibir neste recorte.")
+            return
+        d['Rotulo'] = d['Fonte'].apply(fonte_lbl)
+        fig = px.pie(d, values='Valor', names='Rotulo', hole=.35, color='Fonte',
+                     color_discrete_map={f: cor_fonte(f) for f in d['Fonte']})
+        fig.update_traces(textinfo='percent', textposition='outside', pull=[0.03]*len(d),
+                          hovertemplate="<b>%{label}</b><br>R$ %{value:,.2f}<br>%{percent}<extra></extra>")
+        fig.update_layout(height=460, separators=',.', margin=dict(t=30,b=30,l=20,r=170),
+                          legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02,
+                                      font=dict(size=13)))
+        _, cc, _ = st.columns([0.5,3,0.6])
+        with cc: st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
+
+    def render_folha(dados, titulo="💼 Folha de Pagamento"):
         st.subheader(titulo)
         folha = dados[dados['Elemento'].isin(FOLHA_ELEMENTOS)]
-        total = folha['Total_Liq'].sum()
-        if total <= 0:
-            st.info("Sem despesas de folha liquidadas no período para este recorte.")
-            return
-        gf = folha.groupby('Fonte')['Total_Liq'].sum().reset_index()
-        gf = gf[gf['Total_Liq'] > 0].sort_values('Total_Liq', ascending=True)
-        gf['Rotulo'] = gf['Fonte'].apply(fonte_lbl)
-        fig = go.Figure(go.Bar(
-            x=gf['Total_Liq'], y=gf['Rotulo'], orientation='h',
-            marker_color=[cor_fonte(f) for f in gf['Fonte']],
-            text=[formar_real(v) for v in gf['Total_Liq']], textposition='outside',
-            hovertemplate="<b>%{y}</b><br>Folha Liquidada: R$ %{x:,.2f}<extra></extra>",
-        ))
-        fig.update_layout(height=90+55*len(gf), separators=',.',
-                          xaxis_title="Folha Liquidada (R$)", yaxis_title="",
-                          margin=dict(l=170, r=120, t=30, b=40),
-                          xaxis=dict(range=[0, gf['Total_Liq'].max()*1.22]))
-        st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
-        st.caption(f"Folha total do recorte: **{formar_real(total)}**")
+        gf = folha.groupby('Fonte')['Total_Liq'].sum().reset_index().rename(columns={'Total_Liq':'Valor'})
+        # total ACIMA + pizza por fonte
+        _pizza_por_fonte(gf, "Folha Total (Liquidada)")
+        # Evolução mensal da folha (formato Educação)
+        st.markdown("**📈 Evolução Mensal da Folha (Liquidado)**")
+        st.plotly_chart(_fig_evolucao(folha, cor="#1a7a4a"), use_container_width=True, config=CONFIG_PT)
+
+    def render_total_investido_fonte(dados, titulo="🏥 Total Investido em Saúde — por Fonte"):
+        st.subheader(titulo)
+        gf = dados.groupby('Fonte')['Total_Liq'].sum().reset_index().rename(columns={'Total_Liq':'Valor'})
+        _pizza_por_fonte(gf, "Total Investido (Liquidado)")
 
     def render_detalhamento_elemento(dados, key_prefix="cat"):
         st.markdown('<div id="foco_grafico"></div>', unsafe_allow_html=True)
@@ -408,16 +438,21 @@ if df_raw is not None:
                 </script>""", height=0)
             dd = dados[dados['Elemento'] == ele].sort_values('Orçado', ascending=False).copy()
             st.subheader(f"📊 Detalhamento de Fichas: {ele}")
-            fig = px.bar(dd, x='Ficha', y='Orçado', color_discrete_sequence=["#00CC96"],
-                         custom_data=['Categoria','Fonte'])
+            st.metric("Total Orçado do Elemento", formar_real(dd['Orçado'].sum()))
+            dd['FonteLabel'] = dd['Fonte'].apply(fonte_lbl)
+            # cores diferentes por fonte
+            fig = px.bar(dd, x='Ficha', y='Orçado', color='FonteLabel',
+                         color_discrete_map={fonte_lbl(f): cor_fonte(f)
+                                             for f in dd['Fonte'].unique()},
+                         custom_data=['Categoria','FonteLabel'])
             fig.update_traces(
                 hovertemplate=("<b>Categoria:</b> %{customdata[0]}<br>"
-                               "<b>Fonte:</b> %{customdata[1]}<br>"
+                               "<b>%{customdata[1]}</b><br>"
                                "<b>Valor:</b> R$ %{y:,.2f}<extra></extra>"),
-                text=dd['Orçado'].apply(formar_real), textposition='outside',
-                cliponaxis=False, width=0.8 if len(dd) < 12 else 0.5)
-            fig.update_layout(xaxis_type='category', height=520, separators=',.',
+                text=dd['Orçado'].apply(formar_real), textposition='outside', cliponaxis=False)
+            fig.update_layout(xaxis_type='category', height=540, separators=',.',
                               yaxis=dict(range=[0, dd['Orçado'].max()*1.30]),
+                              legend_title="Fonte", barmode='group',
                               margin=dict(t=80,b=50,l=50,r=50))
             st.plotly_chart(fig, use_container_width=True, theme=None,
                             config=CONFIG_PT, key="detalhamento-fichas")
@@ -426,115 +461,250 @@ if df_raw is not None:
                 st.rerun()
 
     # ══════════════════════════════════════════════════════════════════════════
+    # BLOCO 15% (com toggle Mensal/Acumulado) — usado na Visão Macro
+    # ══════════════════════════════════════════════════════════════════════════
+    def bloco_15():
+        st.subheader("🎯 Aplicação Mínima em Saúde (15%)")
+        if df_r is None or df_df is None:
+            st.info("Dados de receitas/despesas indisponíveis para o cálculo dos 15%.")
+            return
+        base_df = df_r[df_r['Categoria'].isin(['Impostos','Cota-Parte'])]
+        base_tot = soma_cols(base_df, meses_disp)
+        desp_df = df_df[(df_df['Fonte'] == '1500') & (df_df['Tipo'] == 'Liquidado')]
+        desp_tot = soma_cols(desp_df, meses_disp)
+        indice = (desp_tot / base_tot * 100) if base_tot > 0 else 0.0
+        meta_valor = base_tot * 0.15
+
+        # Totais ACIMA do gráfico
+        k1, k2, k3, k4 = st.columns(4)
+        with k1: st.metric("Receita Base (Impostos + Cota-Parte)", formar_real(base_tot))
+        with k2: st.metric("Aplicado em Saúde (Fonte 1500)", formar_real(desp_tot))
+        with k3: st.metric("Índice de Aplicação", f"{indice:.2f}%".replace('.',','),
+                           delta=f"{indice-15:.2f} p.p. vs 15%".replace('.',','),
+                           delta_color=("normal" if indice >= 15 else "inverse"))
+        with k4: st.metric("Mínimo Exigido (15%)", formar_real(meta_valor))
+
+        view = st.segmented_control("Visualização:", ["Mensal","Acumulado"],
+                                    default="Mensal", key="view_15")
+
+        if view == "Acumulado":
+            fig = go.Figure()
+            fig.add_bar(x=["Receita Base"], y=[base_tot], name="Receita Base",
+                        marker_color=C_15_RECEITA, text=[formar_real(base_tot)],
+                        textposition='outside',
+                        hovertemplate="Receita Base: R$ %{y:,.2f}<extra></extra>")
+            fig.add_bar(x=["Aplicado (Fonte 1500)"], y=[desp_tot], name="Aplicado em Saúde",
+                        marker_color=C_15_DESPESA, text=[formar_real(desp_tot)],
+                        textposition='outside',
+                        hovertemplate="Aplicado: R$ %{y:,.2f}<extra></extra>")
+            fig.add_hline(y=meta_valor, line_dash="dash", line_color=C_META,
+                          annotation_text=f"Meta 15% = {formar_real(meta_valor)}",
+                          annotation_position="top left")
+            fig.update_layout(height=430, separators=',.', barmode='group',
+                              yaxis=dict(showticklabels=False), showlegend=True,
+                              legend=dict(orientation="h", yanchor="bottom", y=-0.18,
+                                          xanchor="center", x=0.5), margin=dict(t=40,b=40))
+        else:
+            linhas = []
+            for m in meses_disp:
+                r_m = base_df[m].sum() if m in base_df.columns else 0.0
+                d_m = desp_df[m].sum() if m in desp_df.columns else 0.0
+                linhas += [
+                    {"Mês": m, "Tipo": "Receita (Impostos + Cota-Parte)", "Valor": r_m},
+                    {"Mês": m, "Tipo": "Despesa (Fonte 1500)", "Valor": d_m},
+                ]
+            dfm = pd.DataFrame(linhas)
+            fig = px.bar(dfm, x='Mês', y='Valor', color='Tipo', barmode='group',
+                         color_discrete_map={"Receita (Impostos + Cota-Parte)": C_15_RECEITA,
+                                             "Despesa (Fonte 1500)": C_15_DESPESA},
+                         text='Valor', category_orders={"Mês": meses_disp})
+            fig.update_traces(texttemplate="R$ %{y:,.0f}", textposition='inside',
+                              insidetextanchor='middle',
+                              hovertemplate="<b>%{x} — %{data.name}</b><br>R$ %{y:,.2f}<extra></extra>")
+            # REGRA UNIVERSAL: linha de meta via shapes, _OFFSET=0.22
+            df_lin = dfm[dfm['Tipo'] == "Receita (Impostos + Cota-Parte)"].reset_index(drop=True)
+            df_lin['Meta'] = df_lin['Valor'] * 0.15
+            _OFF = 0.22
+            shapes = []
+            for i, row in df_lin.iterrows():
+                mt = row['Meta']
+                shapes.append(dict(type='line', xref='x', yref='y', x0=i-_OFF, x1=i+_OFF,
+                                   y0=mt, y1=mt, line=dict(color=C_META, dash='dash', width=2)))
+                if i < len(df_lin)-1:
+                    shapes.append(dict(type='line', xref='x', yref='y', x0=i+_OFF, x1=i+1-_OFF,
+                                       y0=mt, y1=df_lin.loc[i+1,'Meta'],
+                                       line=dict(color=C_META, dash='dash', width=2)))
+            fig.update_layout(shapes=shapes)
+            fig.add_trace(go.Scatter(x=[None], y=[None], mode='lines', name='Meta 15% (Mensal)',
+                                     line=dict(color=C_META, dash='dash', width=2)))
+            fig.update_layout(separators=',.', yaxis=dict(showticklabels=False), showlegend=True,
+                              legend=dict(orientation="h", yanchor="bottom", y=-0.22,
+                                          xanchor="center", x=0.5), height=450)
+        st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
+        if indice >= 15:
+            st.success(f"✔ Aplicação de {indice:.2f}% em ASPS, acima do mínimo constitucional de "
+                       "15%.".replace('.',',',1))
+        else:
+            st.error(f"⚠ Aplicação de {indice:.2f}%, abaixo do mínimo constitucional de "
+                     "15% (ASPS).".replace('.',',',1))
+        st.caption("Base legal: CF/1988 art. 198 §2º e §3º; LC nº 141/2012. Cálculo sem deduções.")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # BLOCO Vinculados: Receitas × Despesas por categoria (Mensal/Acumulado)
+    # ══════════════════════════════════════════════════════════════════════════
+    def _desp_grupo_cat(cat, fontes, cols):
+        sub = df_raw[(df_raw['Categoria'] == cat) & (df_raw['Fonte'].isin(fontes))]
+        return soma_cols(sub, cols)
+
+    def bloco_vinc_macro():
+        st.subheader("🔄 Recursos Vinculados — Receitas × Despesas por Categoria (Acumulado)")
+        if df_rv is None:
+            st.info("Arquivo de Receitas Vinculadas (Cássia_RV) indisponível.")
+            return
+        cats_rv = [c for c in cats]  # categorias com fichas
+        rec_meses = [m for m in meses_disp if m in df_rv.columns]
+
+        tot_rec = tot_desp = 0.0
+        fig = go.Figure()
+        # Receitas (empilhadas por origem) — offsetgroup 'Receita'
+        for origem, cor in [('Federal', C_FEDERAL), ('Estadual', C_ESTADUAL)]:
+            vals = []
+            for c in cats_rv:
+                sub = df_rv[(df_rv['Categoria'] == c) & (df_rv['Origem'] == origem)]
+                vals.append(soma_cols(sub, rec_meses))
+            tot_rec += sum(vals)
+            if sum(vals) > 0:
+                fig.add_bar(x=cats_rv, y=vals, name=f"Receita {origem}", marker_color=cor,
+                            offsetgroup='Receita', legendgroup='rec',
+                            hovertemplate=f"<b>%{{x}}</b><br>Receita {origem}: R$ %{{y:,.2f}}<extra></extra>")
+        # Despesas (empilhadas por grupo de fonte) — offsetgroup 'Despesa'
+        for grupo, fontes in GRUPO_DESP_VINC.items():
+            vals = [_desp_grupo_cat(c, fontes, cols_liq) for c in cats_rv]
+            tot_desp += sum(vals)
+            if sum(vals) > 0:
+                fig.add_bar(x=cats_rv, y=vals, name=f"Despesa {grupo}",
+                            marker_color=COR_GRUPO_DESP[grupo], offsetgroup='Despesa',
+                            legendgroup='desp',
+                            hovertemplate=f"<b>%{{x}}</b><br>Despesa {grupo}: R$ %{{y:,.2f}}<extra></extra>")
+
+        c1, c2, c3 = st.columns(3)
+        with c1: st.metric("Total Receitas Vinculadas", formar_real(tot_rec))
+        with c2: st.metric("Total Despesas Vinculadas", formar_real(tot_desp))
+        with c3: st.metric("Saldo (Rec. − Desp.)", formar_real(tot_rec - tot_desp))
+        fig.update_layout(barmode='relative', height=470, separators=',.',
+                          yaxis_title="R$", xaxis_title="",
+                          legend_title="Receitas (azul) × Despesas (fonte)",
+                          legend=dict(orientation="h", yanchor="bottom", y=-0.28,
+                                      xanchor="center", x=0.5), margin=dict(t=20,b=40))
+        st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
+        st.caption("Barra à esquerda de cada categoria = **Receitas Vinculadas** (Federal/Estadual); "
+                   "à direita = **Despesas executadas** por grupo de fonte "
+                   "(Federal Custeio 1600+1604+1605 · Federal Capital 1601 · Estadual 1621).")
+
+    def bloco_vinc_categoria(cat):
+        st.subheader("🔄 Receitas × Despesas — Recursos Vinculados (Federal/Estadual)")
+        rv_cat = df_rv[df_rv['Categoria'] == cat] if df_rv is not None else None
+        desp_vinc = df_raw[(df_raw['Categoria'] == cat) & (df_raw['Fonte'] != '1500')]
+        rec_meses = [m for m in meses_disp if df_rv is not None and m in df_rv.columns]
+        fontes_desp = sorted(desp_vinc['Fonte'].unique()) if not desp_vinc.empty else []
+
+        tot_rec = soma_cols(rv_cat, rec_meses) if rv_cat is not None else 0.0
+        tot_desp = desp_vinc[cols_liq].sum().sum() if not desp_vinc.empty else 0.0
+        if tot_rec <= 0 and tot_desp <= 0:
+            st.info("Sem receitas vinculadas ou despesas de fontes vinculadas para esta categoria.")
+            return
+
+        c1, c2, c3 = st.columns(3)
+        with c1: st.metric("Total Receitas Vinculadas", formar_real(tot_rec))
+        with c2: st.metric("Total Despesas Vinculadas", formar_real(tot_desp))
+        with c3: st.metric("Saldo (Rec. − Desp.)", formar_real(tot_rec - tot_desp))
+
+        view = st.segmented_control("Visualização:", ["Mensal","Acumulado"],
+                                    default="Mensal", key=f"view_vinc_{remover_acentos(cat)}")
+        fig = go.Figure()
+        if view == "Mensal":
+            for origem, cor in [('Federal', C_FEDERAL), ('Estadual', C_ESTADUAL)]:
+                if rv_cat is None: continue
+                sub = rv_cat[rv_cat['Origem'] == origem]
+                vals = [sub[m].sum() if m in sub.columns else 0.0 for m in meses_disp]
+                if sum(vals) > 0:
+                    fig.add_bar(x=meses_disp, y=vals, name=f"Receita {origem}", marker_color=cor,
+                                offsetgroup='Receita', legendgroup='rec',
+                                hovertemplate=f"<b>%{{x}}</b><br>Receita {origem}: R$ %{{y:,.2f}}<extra></extra>")
+            for fonte in fontes_desp:
+                sub = desp_vinc[desp_vinc['Fonte'] == fonte]
+                vals = [sub[f"{m}_Liq"].sum() if f"{m}_Liq" in sub.columns else 0.0 for m in meses_disp]
+                if sum(vals) > 0:
+                    fig.add_bar(x=meses_disp, y=vals, name=fonte_lbl(fonte),
+                                marker_color=cor_fonte(fonte), offsetgroup='Despesa', legendgroup='desp',
+                                hovertemplate=f"<b>%{{x}}</b><br>{fonte_lbl(fonte)} (desp.): R$ %{{y:,.2f}}<extra></extra>")
+            xlabel = ""
+        else:
+            for origem, cor in [('Federal', C_FEDERAL), ('Estadual', C_ESTADUAL)]:
+                if rv_cat is None: continue
+                v = soma_cols(rv_cat[rv_cat['Origem'] == origem], rec_meses)
+                if v > 0:
+                    fig.add_bar(x=["Vinculados"], y=[v], name=f"Receita {origem}", marker_color=cor,
+                                offsetgroup='Receita', legendgroup='rec',
+                                hovertemplate=f"Receita {origem}: R$ %{{y:,.2f}}<extra></extra>")
+            for fonte in fontes_desp:
+                v = desp_vinc[desp_vinc['Fonte'] == fonte][cols_liq].sum().sum()
+                if v > 0:
+                    fig.add_bar(x=["Vinculados"], y=[v], name=fonte_lbl(fonte),
+                                marker_color=cor_fonte(fonte), offsetgroup='Despesa', legendgroup='desp',
+                                hovertemplate=f"{fonte_lbl(fonte)} (desp.): R$ %{{y:,.2f}}<extra></extra>")
+            xlabel = ""
+        fig.update_layout(barmode='relative', height=470, separators=',.', yaxis_title="R$",
+                          xaxis_title=xlabel, legend_title="Receitas (azul) × Despesas (fonte)",
+                          legend=dict(orientation="h", yanchor="bottom", y=-0.28, xanchor="center", x=0.5),
+                          margin=dict(t=20,b=40))
+        st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
+        st.caption("Receitas em azul (Federal/Estadual) · Despesas por fonte (cores específicas). "
+                   "Fonte própria (1500) não entra no comparativo de vinculados.")
+
+    # ══════════════════════════════════════════════════════════════════════════
     # MODO 1 — VISÃO MACRO
     # ══════════════════════════════════════════════════════════════════════════
     if st.session_state.modo == 'Visão Macro':
         st.title("🌐 Cássia — Saúde · Visão Macro")
-        st.caption("Análise dos recursos totais da Saúde no período "
-                   f"({meses_disp[0]}–{meses_disp[-1]}).")
+        st.caption(f"Análise dos recursos totais da Saúde ({meses_disp[0]}–{meses_disp[-1]}).")
         st.markdown("---")
 
-        # 2.1 — Execução orçamentária (mantida)
         render_execucao_orcamentaria(df_raw)
         st.markdown("---")
 
-        # 2.3 — Análise dos 15% (mínimo constitucional em saúde, sem deduções)
-        st.subheader("🎯 Aplicação Mínima em Saúde (15%)")
-        if df_r is not None and df_df is not None:
-            base_15 = soma_cols(df_r[df_r['Categoria'].isin(['Impostos','Cota-Parte'])], meses_disp)
-            desp_1500 = soma_cols(
-                df_df[(df_df['Fonte'] == '1500') & (df_df['Tipo'] == 'Liquidado')], meses_disp)
-            indice_15 = (desp_1500 / base_15 * 100) if base_15 > 0 else 0.0
-            meta_valor = base_15 * 0.15
-
-            k1, k2, k3, k4 = st.columns(4)
-            with k1: st.metric("Receita Base (Impostos + Cota-Parte)", formar_real(base_15))
-            with k2: st.metric("Aplicado em Saúde (Fonte 1500)", formar_real(desp_1500))
-            with k3: st.metric("Índice de Aplicação",
-                               f"{indice_15:.2f}%".replace('.',','),
-                               delta=f"{indice_15-15:.2f} p.p. vs 15%".replace('.',','),
-                               delta_color=("normal" if indice_15 >= 15 else "inverse"))
-            with k4: st.metric("Mínimo Exigido (15%)", formar_real(meta_valor))
-
-            fig15 = go.Figure()
-            fig15.add_bar(x=['Aplicado em Saúde<br>(Fonte 1500)'], y=[desp_1500],
-                          marker_color=('#27ae60' if indice_15 >= 15 else '#e74c3c'),
-                          text=[formar_real(desp_1500)], textposition='outside',
-                          hovertemplate="Aplicado: R$ %{y:,.2f}<extra></extra>", width=0.5)
-            fig15.add_hline(y=meta_valor, line_dash="dash", line_color="#003366",
-                            annotation_text=f"Meta 15% = {formar_real(meta_valor)}",
-                            annotation_position="top left")
-            fig15.update_layout(height=380, separators=',.', yaxis_title="R$",
-                                yaxis=dict(range=[0, max(desp_1500, meta_valor)*1.25]),
-                                margin=dict(t=40,b=30,l=40,r=40), showlegend=False)
-            st.plotly_chart(fig15, use_container_width=True, config=CONFIG_PT)
-            if indice_15 >= 15:
-                st.success(f"✔ O município aplicou **{indice_15:.2f}%** das receitas de impostos e "
-                           f"transferências em Ações e Serviços Públicos de Saúde (ASPS), acima do "
-                           f"mínimo constitucional de 15%.".replace('.',',',1))
-            else:
-                st.error(f"⚠ Aplicação de **{indice_15:.2f}%**, abaixo do mínimo constitucional de "
-                         f"15% (ASPS).".replace('.',',',1))
-            st.caption("Base legal: CF/1988 art. 198 §2º e §3º; LC nº 141/2012 (define ASPS e o "
-                       "mínimo de 15%). Cálculo sem deduções: despesa própria de saúde (fonte 1500) "
-                       "sobre a receita de impostos e cota-parte.")
-        else:
-            st.info("Dados de receitas/despesas indisponíveis para o cálculo dos 15%.")
+        bloco_15()
         st.markdown("---")
 
-        # 2.4 — Receitas Federais e Estaduais por categoria
-        st.subheader("🏛️ Receitas Vinculadas — Federais e Estaduais por Categoria")
-        if df_rv is not None and not df_rv.empty:
-            grv = (df_rv.assign(V=df_rv[[m for m in meses_disp if m in df_rv.columns]].sum(axis=1))
-                        .groupby(['Categoria','Origem'])['V'].sum().reset_index())
-            grv = grv[grv['V'] > 0]
-            ordem_cat = (grv.groupby('Categoria')['V'].sum()
-                         .sort_values(ascending=False).index.tolist())
-            fig_rv = px.bar(grv, x='Categoria', y='V', color='Origem', barmode='group',
-                            color_discrete_map={'Federal':C_FEDERAL,'Estadual':C_ESTADUAL},
-                            category_orders={'Categoria': ordem_cat})
-            fig_rv.update_traces(
-                hovertemplate="<b>%{x}</b><br><b>%{data.name}:</b> R$ %{y:,.2f}<extra></extra>")
-            fig_rv.update_layout(height=430, separators=',.', xaxis_title="",
-                                 yaxis_title="Receita (R$)", legend_title="Origem",
-                                 margin=dict(t=30,b=40))
-            st.plotly_chart(fig_rv, use_container_width=True, config=CONFIG_PT)
-            tot_fed = grv[grv['Origem']=='Federal']['V'].sum()
-            tot_est = grv[grv['Origem']=='Estadual']['V'].sum()
-            cfed, cest, ctot = st.columns(3)
-            with cfed: st.metric("Total Federal", formar_real(tot_fed))
-            with cest: st.metric("Total Estadual", formar_real(tot_est))
-            with ctot: st.metric("Total Vinculado", formar_real(tot_fed+tot_est))
-        else:
-            st.info("Arquivo de Receitas Vinculadas (Cássia_RV) indisponível.")
+        bloco_vinc_macro()
         st.markdown("---")
 
-        # 2.5 — Custeio × Capital detalhado por fonte
+        # Custeio × Capital por fonte (totais ACIMA)
         st.subheader("📊 Custeio × Capital — Detalhado por Fonte")
-        gcc = (df_raw.groupby(['Fonte','Natureza'])['Total_Liq'].sum().reset_index())
-        gcc = gcc[gcc['Total_Liq'] > 0].copy()
-        gcc['Rotulo'] = gcc['Fonte'].apply(fonte_lbl)
-        ordem_f = (gcc.groupby('Rotulo')['Total_Liq'].sum()
-                   .sort_values(ascending=False).index.tolist())
-        fig_cc = px.bar(gcc, x='Rotulo', y='Total_Liq', color='Natureza',
-                        barmode='stack', category_orders={'Rotulo': ordem_f},
-                        color_discrete_map={'Custeio (Manut.)':'#00CC96',
-                                            'Capital (Invest.)':'#EF553B'})
-        fig_cc.update_traces(
-            hovertemplate="<b>%{x}</b><br><b>%{data.name}:</b> R$ %{y:,.2f}<extra></extra>")
-        fig_cc.update_layout(height=440, separators=',.', xaxis_title="",
-                             yaxis_title="Liquidado (R$)", legend_title="Natureza",
-                             margin=dict(t=30,b=90), xaxis_tickangle=-25)
-        st.plotly_chart(fig_cc, use_container_width=True, config=CONFIG_PT)
         tc = df_raw[df_raw['Natureza']=='Custeio (Manut.)']['Total_Liq'].sum()
         tk = df_raw[df_raw['Natureza']=='Capital (Invest.)']['Total_Liq'].sum()
         cc1, cc2 = st.columns(2)
         with cc1: st.metric("Total Custeio", formar_real(tc))
         with cc2: st.metric("Total Capital", formar_real(tk))
+        gcc = df_raw.groupby(['Fonte','Natureza'])['Total_Liq'].sum().reset_index()
+        gcc = gcc[gcc['Total_Liq'] > 0].copy()
+        gcc['Rotulo'] = gcc['Fonte'].apply(fonte_lbl)
+        ordem_f = (gcc.groupby('Rotulo')['Total_Liq'].sum().sort_values(ascending=False).index.tolist())
+        fig_cc = px.bar(gcc, x='Rotulo', y='Total_Liq', color='Natureza', barmode='stack',
+                        category_orders={'Rotulo': ordem_f},
+                        color_discrete_map={'Custeio (Manut.)':'#00CC96','Capital (Invest.)':'#EF553B'})
+        fig_cc.update_traces(hovertemplate="<b>%{x}</b><br><b>%{data.name}:</b> R$ %{y:,.2f}<extra></extra>")
+        fig_cc.update_layout(height=440, separators=',.', xaxis_title="", yaxis_title="Liquidado (R$)",
+                             legend_title="Natureza", margin=dict(t=20,b=90), xaxis_tickangle=-25)
+        st.plotly_chart(fig_cc, use_container_width=True, config=CONFIG_PT)
         st.markdown("---")
 
-        # 2.8 — Total Investido em Saúde (pizza por categoria) — mantido
-        st.subheader(f"🏥 Total Investido em Saúde — Liquidado ({meses_disp[0]}–{meses_disp[-1]})")
+        # Folha (pizza + evolução) — ANTES do Total Investido
+        render_folha(df_raw, "💼 Folha de Pagamento Total")
+        st.markdown("---")
+
+        # Total Investido em Saúde por CATEGORIA (pizza) — total ACIMA
+        st.subheader(f"🏥 Total Investido em Saúde — por Categoria ({meses_disp[0]}–{meses_disp[-1]})")
         NOME_CAT = {'Secretaria':'Administração','Atenção Primária':'Atenção Primária',
                     'MAC':'Ambulatorial e Especialidades (MAC)','Farmácia':'Farmácia',
                     'Vigilância':'Vigilância'}
@@ -544,27 +714,23 @@ if df_raw is not None:
         dpz = df_raw.groupby('Categoria')['Total_Liq'].sum().reset_index()
         dpz['Label'] = dpz['Categoria'].map(NOME_CAT).fillna(dpz['Categoria'])
         dpz = dpz[dpz['Total_Liq'] > 0]
-        total_geral = dpz['Total_Liq'].sum()
+        st.metric("Total Liquidado", formar_real(dpz['Total_Liq'].sum()))
         fig_pz = px.pie(dpz, values='Total_Liq', names='Label', hole=0.0,
                         color='Label', color_discrete_map=CORES_CAT)
-        fig_pz.update_traces(
-            textinfo='label+percent', textposition='outside', pull=[0.03]*len(dpz),
-            hovertemplate=("<b>%{label}</b><br>Liquidado: <b>R$ %{value:,.2f}</b><br>"
-                           "Participação: <b>%{percent}</b><extra></extra>"),
-            hoverlabel=dict(bgcolor="rgba(0,0,0,0.85)", font_size=13, font_color="white"))
-        fig_pz.update_layout(
-            title=dict(text=f"Total Liquidado: <b>{formar_real(total_geral)}</b>",
-                       x=0.5, xanchor='center', font=dict(size=14)),
-            showlegend=True, height=480, separators=',.',
-            legend=dict(orientation="v", yanchor="middle", y=0.8, xanchor="left", x=1.02,
-                        font=dict(size=13), itemclick="toggle", itemdoubleclick="toggleothers"),
-            margin=dict(t=60,b=40,l=20,r=180))
+        fig_pz.update_traces(textinfo='label+percent', textposition='outside', pull=[0.03]*len(dpz),
+                             hovertemplate=("<b>%{label}</b><br>Liquidado: <b>R$ %{value:,.2f}</b><br>"
+                                            "Participação: <b>%{percent}</b><extra></extra>"),
+                             hoverlabel=dict(bgcolor="rgba(0,0,0,0.85)", font_size=13, font_color="white"))
+        fig_pz.update_layout(showlegend=True, height=470, separators=',.',
+                             legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02,
+                                         font=dict(size=13), itemclick="toggle", itemdoubleclick="toggleothers"),
+                             margin=dict(t=30,b=40,l=20,r=180))
         _, cpz, _ = st.columns([0.5,3,0.5])
         with cpz: st.plotly_chart(fig_pz, use_container_width=True, config=CONFIG_PT)
         st.markdown("---")
 
-        # 2.9 — Folha Total por fonte
-        render_folha_por_fonte(df_raw, "💼 Folha de Pagamento Total — por Fonte")
+        # Total Investido em Saúde por FONTE (pizza) — item novo
+        render_total_investido_fonte(df_raw, "🏥 Total Investido em Saúde — por Fonte")
 
     # ══════════════════════════════════════════════════════════════════════════
     # MODO 2 — ANÁLISE POR CATEGORIA
@@ -573,66 +739,25 @@ if df_raw is not None:
         cat = st.session_state.modo
         df_cat = df_raw[df_raw['Categoria'] == cat].copy()
         st.title(f"📂 {cat} — Saúde")
-        st.caption(f"Análise da categoria no período ({meses_disp[0]}–{meses_disp[-1]}).")
+        st.caption(f"Análise da categoria ({meses_disp[0]}–{meses_disp[-1]}).")
         st.markdown("---")
 
-        # 3.1 — Execução orçamentária da categoria (mantida)
         render_execucao_orcamentaria(df_cat)
         st.markdown("---")
 
-        # 3.2 — Receitas × Despesas mensal — Vinculados Federal/Estadual (modelo FUNDEB)
-        st.subheader("🔄 Receitas × Despesas Mensal — Recursos Vinculados (Federal/Estadual)")
-        rv_cat = df_rv[df_rv['Categoria'] == cat] if df_rv is not None else None
-        desp_vinc = df_cat[df_cat['Fonte'] != '1500']
-        tem_rec = rv_cat is not None and not rv_cat.empty
-        tem_desp = not desp_vinc.empty and desp_vinc[cols_liq].sum().sum() > 0
-        if tem_rec or tem_desp:
-            fig_rd = go.Figure()
-            # Receitas por origem (empilhadas), offsetgroup 'Receita'
-            if tem_rec:
-                for origem, cor in [('Federal', C_FEDERAL), ('Estadual', C_ESTADUAL)]:
-                    sub = rv_cat[rv_cat['Origem'] == origem]
-                    vals = [sub[m].sum() if m in sub.columns else 0.0 for m in meses_disp]
-                    if sum(vals) <= 0: continue
-                    fig_rd.add_bar(x=meses_disp, y=vals, name=f"Receita {origem}",
-                                   marker_color=cor, offsetgroup='Receita', legendgroup='rec',
-                                   hovertemplate=(f"<b>%{{x}}</b><br>Receita {origem}: "
-                                                  "R$ %{y:,.2f}<extra></extra>"))
-            # Despesas por fonte (empilhadas), offsetgroup 'Despesa'
-            if tem_desp:
-                for fonte in sorted(desp_vinc['Fonte'].unique()):
-                    sub = desp_vinc[desp_vinc['Fonte'] == fonte]
-                    vals = [sub[f"{m}_Liq"].sum() if f"{m}_Liq" in sub.columns else 0.0
-                            for m in meses_disp]
-                    if sum(vals) <= 0: continue
-                    fig_rd.add_bar(x=meses_disp, y=vals, name=fonte_lbl(fonte),
-                                   marker_color=cor_fonte(fonte), offsetgroup='Despesa',
-                                   legendgroup='desp',
-                                   hovertemplate=(f"<b>%{{x}}</b><br>{fonte_lbl(fonte)} (desp.): "
-                                                  "R$ %{y:,.2f}<extra></extra>"))
-            fig_rd.update_layout(barmode='relative', height=470, separators=',.',
-                                 yaxis_title="R$", xaxis_title="",
-                                 legend_title="Receitas (cor) × Despesas (fonte)",
-                                 margin=dict(t=30,b=40))
-            st.plotly_chart(fig_rd, use_container_width=True, config=CONFIG_PT)
-            st.caption("Barra à esquerda de cada mês = **Receitas Vinculadas** (por origem); "
-                       "barra à direita = **Despesas** liquidadas (por fonte). Fonte própria (1500) "
-                       "não entra neste comparativo de recursos vinculados.")
-        else:
-            st.info("Sem receitas vinculadas ou despesas de fontes vinculadas para esta categoria "
-                    "no período.")
+        bloco_vinc_categoria(cat)
         st.markdown("---")
 
-        # 3.5 — Custeio × Capital ANTES do detalhamento de fichas
-        render_custeio_capital_pizza(df_cat)
+        render_custeio_capital_pizza(df_cat)   # antes do detalhamento de fichas
         st.markdown("---")
 
-        # 3.3 / 3.4 — Detalhamento por elemento + fichas
         render_detalhamento_elemento(df_cat, key_prefix=f"cat_{remover_acentos(cat)}")
         st.markdown("---")
 
-        # 3.8 — Folha por fonte (categoria)
-        render_folha_por_fonte(df_cat, "💼 Folha de Pagamento da Categoria — por Fonte")
+        render_folha(df_cat, "💼 Folha de Pagamento da Categoria")
+        st.markdown("---")
+
+        render_total_investido_fonte(df_cat, "🏥 Total Investido na Categoria — por Fonte")
 
 else:
     st.error("Arquivos de dados não encontrados! Verifique a pasta 'zSaúde'.")
