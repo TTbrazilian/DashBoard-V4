@@ -8,6 +8,16 @@ import plotly.io as pio
 import os
 import plotly.graph_objects as go
 import streamlit.components.v1 as components
+
+# Compat st.iframe (Streamlit >= 1.56): components.html foi descontinuado e
+# st.iframe não aceita height=0 (usado para injeção invisível de JS). Usa st.iframe
+# quando disponível, com "content" no lugar de altura não-positiva; senão, fallback.
+def _html_iframe(html, height=0, scrolling=False):
+    if hasattr(st, "iframe"):
+        h = height if isinstance(height, int) and height > 0 else "content"
+        st.iframe(html, height=h)
+    else:
+        components.html(html, height=height, scrolling=scrolling)
 from datetime import datetime
 from io import BytesIO
 
@@ -598,7 +608,7 @@ if df_f_raw is not None and df_r is not None:
         'run();setTimeout(run,50);setTimeout(run,200);setTimeout(run,600);'
         '})()</script>'
     )
-    components.html(_js_sidebar, height=0)
+    _html_iframe(_js_sidebar, height=0)
 
     # =========================================================================
     # SETOR FUNDEB

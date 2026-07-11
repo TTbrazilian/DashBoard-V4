@@ -6,6 +6,16 @@ import os
 import plotly.graph_objects as go
 import streamlit.components.v1 as components
 
+# Compat st.iframe (Streamlit >= 1.56): components.html foi descontinuado e
+# st.iframe não aceita height=0 (usado para injeção invisível de JS). Usa st.iframe
+# quando disponível, com "content" no lugar de altura não-positiva; senão, fallback.
+def _html_iframe(html, height=0, scrolling=False):
+    if hasattr(st, "iframe"):
+        h = height if isinstance(height, int) and height > 0 else "content"
+        st.iframe(html, height=h)
+    else:
+        components.html(html, height=height, scrolling=scrolling)
+
 st.set_page_config(page_title="São Roque de Minas - Gestão Educação", layout="wide")
 
 st.markdown("""
@@ -255,7 +265,7 @@ if df_f_raw is not None and df_r is not None:
             "})()</script>"
         )
 
-    components.html(
+    _html_iframe(
         _js_sidebar_universal(
             _ler_logo("LOGOTIPO IG2P - OFICIAL - BRANCO.png"),
             _ler_logo("LOGOTIPO IG2P - OFICIAL.png"),
