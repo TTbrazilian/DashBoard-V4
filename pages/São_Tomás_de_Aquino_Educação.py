@@ -49,6 +49,26 @@ st.markdown("""
         [data-testid="stSidebarNav"] li:first-child > a > p {
             display: none !important;
         }
+        /* ===== CABEÇALHO NO TOPO (regra universal iG2P) =====
+           Remove o espaço vazio acima do título:
+           (1) reduz o padding-top padrão do container principal;
+           (2) colapsa o container do iframe de injeção de JS (logo iG2P), que
+               renderiza uma faixa vazia no topo da área principal.
+           Obs.: o único iframe do fluxo principal é o de injeção do logo;
+           gráficos Plotly não são iframes, então não são afetados. */
+        [data-testid="stMainBlockContainer"], .stMainBlockContainer,
+        .block-container {
+            padding-top: 1.5rem !important;
+        }
+        [data-testid="stElementContainer"]:has(iframe),
+        .element-container:has(iframe),
+        [data-testid="stIFrame"] {
+            height: 0 !important;
+            min-height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+        }
     </style>
 """, unsafe_allow_html=True)
 
