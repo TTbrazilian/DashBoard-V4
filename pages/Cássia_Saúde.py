@@ -30,6 +30,26 @@ st.markdown("""
         [data-testid="stSidebarNav"] li:first-child > a > p {
             display: none !important;
         }
+        /* ===== CABEÇALHO NO TOPO (regra universal iG2P) =====
+           Remove o espaço vazio acima do título:
+           (1) reduz o padding-top padrão do container principal;
+           (2) colapsa o container do iframe de injeção de JS (logo iG2P), que
+               renderiza uma faixa vazia no topo da área principal.
+           Obs.: os únicos iframes do fluxo principal são os de injeção de JS
+           (logo e scroll); gráficos Plotly não são iframes, então não são afetados. */
+        [data-testid="stMainBlockContainer"], .stMainBlockContainer,
+        .block-container {
+            padding-top: 1.5rem !important;
+        }
+        [data-testid="stElementContainer"]:has(iframe),
+        .element-container:has(iframe),
+        [data-testid="stIFrame"] {
+            height: 0 !important;
+            min-height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -90,6 +110,14 @@ COR_GRUPO_DESP = {
     'Federal Capital': '#8e44ad',
     'Estadual':        '#c0392b',
 }
+
+# Origem de cada fonte de despesa (usado no filtro Federal/Estadual dos vinculados)
+ORIGEM_FONTE = {
+    '1600':'Federal','1601':'Federal','1602':'Federal','1603':'Federal',
+    '1604':'Federal','1605':'Federal','1631':'Federal','1659':'Federal','1706':'Federal',
+    '1621':'Estadual','2621':'Estadual',
+}
+def origem_da_fonte(f): return ORIGEM_FONTE.get(str(f).strip())
 
 # Elementos de folha/pessoal (ajustável). Usados em "Folha por Fonte".
 FOLHA_ELEMENTOS = [
@@ -628,6 +656,25 @@ if df_raw is not None:
             st.info("Sem receitas vinculadas ou despesas de fontes vinculadas para esta categoria.")
             return
 
+        # ── Filtro Federal/Estadual — botão alterna: clicar no ativo desativa ──
+        _kf = f"filtro_vinc_{remover_acentos(cat)}"
+        if _kf not in st.session_state:
+            st.session_state[_kf] = None
+        filtro = st.session_state[_kf]
+
+        # Receitas (por Origem) e despesas (por origem da fonte) seguem o filtro
+        origens_plot = ['Federal', 'Estadual'] if filtro is None else [filtro]
+        fontes_plot  = ([f for f in fontes_desp if origem_da_fonte(f) == filtro]
+                        if filtro else fontes_desp)
+
+        rv_plot   = rv_cat[rv_cat['Origem'].isin(origens_plot)] if rv_cat is not None else None
+        desp_plot = (desp_vinc[desp_vinc['Fonte'].isin(fontes_plot)]
+                     if not desp_vinc.empty else desp_vinc)
+
+        # Totais ACIMA do gráfico (refletem o filtro ativo)
+        tot_rec  = soma_cols(rv_plot, rec_meses) if rv_plot is not None else 0.0
+        tot_desp = desp_plot[cols_liq].sum().sum() if not desp_plot.empty else 0.0
+
         c1, c2, c3 = st.columns(3)
         with c1: st.metric("Total Receitas Vinculadas", formar_real(tot_rec))
         with c2: st.metric("Total Despesas Vinculadas", formar_real(tot_desp))
@@ -635,17 +682,31 @@ if df_raw is not None:
 
         view = st.segmented_control("Visualização:", ["Mensal","Acumulado"],
                                     default="Mensal", key=f"view_vinc_{remover_acentos(cat)}")
+
+        st.caption("Origem (clique novamente para voltar à visualização padrão):")
+        fb1, fb2, _fb = st.columns([1, 1, 6])
+        with fb1:
+            if st.button("Federal", key=f"{_kf}_fed", use_container_width=True,
+                         type=("primary" if filtro == 'Federal' else "secondary")):
+                st.session_state[_kf] = None if filtro == 'Federal' else 'Federal'
+                st.rerun()
+        with fb2:
+            if st.button("Estadual", key=f"{_kf}_est", use_container_width=True,
+                         type=("primary" if filtro == 'Estadual' else "secondary")):
+                st.session_state[_kf] = None if filtro == 'Estadual' else 'Estadual'
+                st.rerun()
+
         fig = go.Figure()
         if view == "Mensal":
             for origem, cor in [('Federal', C_FEDERAL), ('Estadual', C_ESTADUAL)]:
-                if rv_cat is None: continue
+                if rv_cat is None or origem not in origens_plot: continue
                 sub = rv_cat[rv_cat['Origem'] == origem]
                 vals = [sub[m].sum() if m in sub.columns else 0.0 for m in meses_disp]
                 if sum(vals) > 0:
                     fig.add_bar(x=meses_disp, y=vals, name=f"Receita {origem}", marker_color=cor,
                                 offsetgroup='Receita', legendgroup='rec',
                                 hovertemplate=f"<b>%{{x}}</b><br>Receita {origem}: R$ %{{y:,.2f}}<extra></extra>")
-            for fonte in fontes_desp:
+            for fonte in fontes_plot:
                 sub = desp_vinc[desp_vinc['Fonte'] == fonte]
                 vals = [sub[f"{m}_Liq"].sum() if f"{m}_Liq" in sub.columns else 0.0 for m in meses_disp]
                 if sum(vals) > 0:
@@ -655,23 +716,28 @@ if df_raw is not None:
             xlabel = ""
         else:
             for origem, cor in [('Federal', C_FEDERAL), ('Estadual', C_ESTADUAL)]:
-                if rv_cat is None: continue
+                if rv_cat is None or origem not in origens_plot: continue
                 v = soma_cols(rv_cat[rv_cat['Origem'] == origem], rec_meses)
                 if v > 0:
                     fig.add_bar(x=["Vinculados"], y=[v], name=f"Receita {origem}", marker_color=cor,
                                 offsetgroup='Receita', legendgroup='rec',
                                 hovertemplate=f"Receita {origem}: R$ %{{y:,.2f}}<extra></extra>")
-            for fonte in fontes_desp:
+            for fonte in fontes_plot:
                 v = desp_vinc[desp_vinc['Fonte'] == fonte][cols_liq].sum().sum()
                 if v > 0:
                     fig.add_bar(x=["Vinculados"], y=[v], name=fonte_lbl(fonte),
                                 marker_color=cor_fonte(fonte), offsetgroup='Despesa', legendgroup='desp',
                                 hovertemplate=f"{fonte_lbl(fonte)} (desp.): R$ %{{y:,.2f}}<extra></extra>")
             xlabel = ""
+        if not fig.data:
+            st.info("Sem valores para a origem selecionada nesta categoria.")
+            return
+        # Legenda à DIREITA (padrão dos demais gráficos) + margem reservada
         fig.update_layout(barmode='relative', height=470, separators=',.', yaxis_title="R$",
-                          xaxis_title=xlabel, legend_title="Receitas (azul) × Despesas (fonte)",
-                          legend=dict(orientation="h", yanchor="bottom", y=-0.28, xanchor="center", x=0.5),
-                          margin=dict(t=20,b=40))
+                          xaxis_title=xlabel, legend_title="Receitas × Despesas",
+                          legend=dict(orientation="v", yanchor="middle", y=0.5,
+                                      xanchor="left", x=1.02, font=dict(size=12)),
+                          margin=dict(t=20, b=40, l=20, r=240))
         st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
         st.caption("Receitas em azul (Federal/Estadual) · Despesas por fonte (cores específicas). "
                    "Fonte própria (1500) não entra no comparativo de vinculados.")
