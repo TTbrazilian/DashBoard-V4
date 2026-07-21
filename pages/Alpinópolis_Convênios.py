@@ -21,7 +21,25 @@ st.set_page_config(page_title="Convênios - Gestão iG2P", layout="wide")
 pio.templates.default = "plotly_dark"
 CONFIG_PT = {'displaylogo': False, 'showTips': False}
 
-MUNICIPIO = "Alpinópolis"
+# ── MULTIMUNICÍPIO ────────────────────────────────────────────────────────────
+# O município é detectado AUTOMATICAMENTE pelo nome deste arquivo.
+# Para lançar um novo município de Convênios, basta:
+#   1) copiar este arquivo para  pages/<Município>_Convênios.py
+#      (ex.: "Cássia_Convênios.py", "Itaú de Minas_Convênios.py")
+#   2) adicionar 1 linha no secrets, em [convenios]:  "Cássia" = "<sheet_id>"
+# Nenhuma outra alteração é necessária.
+MUNICIPIO_FALLBACK = "Alpinópolis"   # usado só se não for possível ler o nome do arquivo
+
+def _detectar_municipio():
+    try:
+        base = os.path.splitext(os.path.basename(__file__))[0]  # "<Município>_Convênios"
+        nome = re.sub(r"[_\s]*Conv[êe]nios\s*$", "", base, flags=re.IGNORECASE)
+        nome = nome.replace("_", " ").strip()
+        return nome or MUNICIPIO_FALLBACK
+    except Exception:
+        return MUNICIPIO_FALLBACK
+
+MUNICIPIO = _detectar_municipio()
 
 # Nomes EXATOS das abas (refletem os arquivos CSV). Atenção a espaços!
 ABAS = {
@@ -129,15 +147,28 @@ def _valores_para_df(valores):
     return df
 
 
+def _sheet_id_do_municipio():
+    """Lê o sheet_id do município atual em [convenios]. Aceita mapa por município
+    ( "Alpinópolis" = "id..." ) ou a chave única legada ( sheet_id = "id..." )."""
+    if "convenios" not in st.secrets:
+        return None
+    sec = st.secrets["convenios"]
+    if MUNICIPIO in sec:
+        return sec[MUNICIPIO]
+    if "sheet_id" in sec:
+        return sec["sheet_id"]
+    return None
+
+
 @st.cache_data(ttl=600)
 def load_convenios():
     """Retorna dict {chave: DataFrame} para cada aba. Sheets API → fallback CSV."""
     dados = {}
-    # 1) Tenta Google Sheets
-    if "gcp_service_account" in st.secrets and "convenios" in st.secrets:
+    # 1) Tenta Google Sheets (sheet_id específico do município)
+    sid = _sheet_id_do_municipio()
+    if "gcp_service_account" in st.secrets and sid:
         try:
             gc = _conectar_sheets()
-            sid = st.secrets["convenios"]["sheet_id"]
             for chave, aba in ABAS.items():
                 ws = _abrir_aba(gc, sid, aba)
                 dados[chave] = _valores_para_df(ws.get_all_values())
@@ -145,6 +176,9 @@ def load_convenios():
         except Exception as e:
             st.warning(f"Falha ao ler Google Sheets ({type(e).__name__}: {e}). "
                        "Tentando arquivos locais...")
+    elif "gcp_service_account" in st.secrets and not sid:
+        st.info(f"Defina o sheet_id de **{MUNICIPIO}** no secrets, em `[convenios]` "
+                f"(ex.: `\"{MUNICIPIO}\" = \"<id_da_planilha>\"`).")
 
     # 2) Fallback CSV local — casa o arquivo pela aba normalizando espaços/underscores
     import glob
@@ -158,13 +192,16 @@ def load_convenios():
     def _norm(s):
         return re.sub(r"[\s_]+", "", str(s)).strip().lower()
 
+    alvo_mun = _norm(MUNICIPIO)
     for chave, aba in ABAS.items():
         alvo = _norm(aba)
         achado = None
         for p in arquivos:
             base = os.path.basename(p).replace(".csv", "")
-            parte = re.sub(r"^Emendas_-_.*?_-_", "", base)  # remove 'Emendas_-_<Mun>_-_'
-            if _norm(parte) == alvo:
+            mm = re.match(r"^Emendas_-_(.*?)_-_(.*)$", base)  # (município)(aba)
+            if not mm or _norm(mm.group(1)) != alvo_mun:
+                continue
+            if _norm(mm.group(2)) == alvo:
                 achado = p
                 break
         if achado:
@@ -192,6 +229,12 @@ st.markdown("""
     <style>
         #MainMenu, footer {visibility: hidden;}
         .stButton button { border-radius: 10px; font-weight: 600; }
+        /* ===== ANIMAÇÃO DOS GRÁFICOS (regra universal iG2P) ===== */
+        @keyframes subirBarra { from { clip-path: inset(100% 0 0 0); } to { clip-path: inset(0% 0 0 0); } }
+        .js-plotly-plot .point path {
+            animation: subirBarra 1.2s cubic-bezier(0.25,1,0.5,1) forwards;
+            animation-delay: 0.15s; clip-path: inset(100% 0 0 0);
+        }
         [data-testid="stSidebarNav"] li:first-child > a > span,
         [data-testid="stSidebarNav"] li:first-child > a > p { display: none !important; }
         /* ===== CABEÇALHO NO TOPO (regra universal iG2P) ===== */
@@ -256,12 +299,12 @@ def tabela_detalhe(df, colunas):
 DADOS = load_convenios()
 
 if "setor" not in st.session_state:
-    st.session_state.setor = "Visão Geral"
+    st.session_state.setor = "Visão Macro"
 
 st.sidebar.title("🤝 Convênios & Emendas")
 st.sidebar.caption(f"Município: {MUNICIPIO}")
 st.sidebar.markdown("---")
-for label in ["Visão Geral", "Convênios Federais", "Convênios Estaduais",
+for label in ["Visão Macro", "Convênio a Convênio", "Convênios Federais", "Convênios Estaduais",
               "Emendas Especiais Federais", "Emendas Especiais Estaduais", "MDS"]:
     if st.sidebar.button(label, use_container_width=True,
                          type=("primary" if st.session_state.setor == label else "secondary")):
@@ -271,22 +314,91 @@ for label in ["Visão Geral", "Convênios Federais", "Convênios Estaduais",
 # Logo iG2P na sidebar (injeção via iframe invisível)
 import base64 as _b64
 def _ler_logo(nome):
-    for p in [f"Logos/{nome}", f"../Logos/{nome}"]:
+    cands = [f"Logos/{nome}", f"../Logos/{nome}"]
+    try:
+        d = os.path.dirname(__file__)
+        cands += [os.path.join(d, "Logos", nome), os.path.join(d, "..", "Logos", nome)]
+    except NameError:
+        pass
+    for p in cands:
         if os.path.exists(p):
             return "data:image/png;base64," + _b64.b64encode(open(p, "rb").read()).decode()
     return ""
-_logo = _ler_logo("LOGOTIPO IG2P - OFICIAL - BRANCO.png")
-if _logo:
-    _html_iframe(f"""<script>(function(){{
-        var img=window.parent.document.querySelector('img.ig2p-logo-conv');
-        if(img)return;
-        var nav=window.parent.document.querySelector('[data-testid="stSidebarNav"]');
-        if(!nav)return;
-        var i=window.parent.document.createElement('img');
-        i.src="{_logo}"; i.className="ig2p-logo-conv";
-        i.style.cssText="width:130px;display:block;margin:8px auto;";
-        nav.parentNode.insertBefore(i, nav);
-    }})()</script>""", height=0)
+
+_logo_escuro = _ler_logo("LOGOTIPO IG2P - OFICIAL - BRANCO.png")   # p/ fundo escuro
+_logo_claro  = _ler_logo("LOGOTIPO IG2P - OFICIAL.png")            # p/ fundo claro
+
+# ── LOADER central com logo (regra universal iG2P) — tema-aware, some sozinho ──
+if _logo_escuro or _logo_claro:
+    st.markdown(f"""
+    <div class="ig2p-loader">
+      <img class="ig2p-logo-escuro" src="{_logo_escuro}">
+      <img class="ig2p-logo-claro"  src="{_logo_claro}">
+    </div>
+    <style>
+      .ig2p-loader {{ position:fixed; inset:0; z-index:99999; pointer-events:none;
+        display:flex; align-items:center; justify-content:center;
+        background:#0E1117; animation: ig2pFade 0.9s ease forwards; }}
+      .ig2p-loader img {{ width:150px; height:auto; animation: ig2pPulse 0.9s ease-in-out infinite; }}
+      .ig2p-loader .ig2p-logo-claro {{ display:none; }}
+      @media (prefers-color-scheme: light) {{
+        .ig2p-loader {{ background:#FFFFFF; }}
+        .ig2p-loader .ig2p-logo-escuro {{ display:none; }}
+        .ig2p-loader .ig2p-logo-claro  {{ display:block; }}
+      }}
+      @keyframes ig2pPulse {{ 0%,100%{{opacity:.35;transform:scale(.94)}} 50%{{opacity:1;transform:scale(1.04)}} }}
+      @keyframes ig2pFade {{ 0%,50%{{opacity:1;visibility:visible}} 100%{{opacity:0;visibility:hidden}} }}
+    </style>
+    """, unsafe_allow_html=True)
+
+# ── SIDEBAR: mostra só páginas de Convênios + logo como botão Home (regra universal) ──
+def _js_sidebar_conv(LE, LC):
+    return (
+        "<script>(function(){"
+        'var LE="' + LE + '";var LC="' + LC + '";'
+        "function dE(){try{"
+        "var bg=window.parent.getComputedStyle(window.parent.document.body).backgroundColor;"
+        "if(!bg||bg==='rgba(0,0,0,0)')return true;"
+        "var v=bg.match(/[0-9]+/g).map(Number);return v[0]<128;"
+        "}catch(e){return true;}}"
+        "var _busy=false;"
+        "function run(){if(_busy)return;_busy=true;try{"
+        "var doc=window.parent.document;"
+        "var nav=doc.querySelector('[data-testid=\"stSidebarNav\"]');"
+        "if(!nav){_busy=false;return;}"
+        "nav.querySelectorAll('li').forEach(function(it){"
+        "var lk=it.querySelector('a');if(!lk)return;"
+        "var sp=lk.querySelector('span');"
+        "var tx=(sp?sp.textContent:lk.textContent).trim();"
+        "var isH=tx==='Home'||tx.toLowerCase()==='home'||(lk.href&&lk.href.toLowerCase().indexOf('/home')!==-1);"
+        "var isC=it.textContent.indexOf('Conv\u00eanio')!==-1;"
+        "if(!isH&&!isC){it.style.setProperty('display','none','important');return;}"
+        "it.style.removeProperty('display');"
+        "if(!isH)return;"
+        "if(lk.querySelector('img.ig2p-logo-sidebar'))return;"
+        "if(sp)sp.style.setProperty('display','none','important');"
+        "lk.style.setProperty('padding','4px 8px','important');"
+        "lk.style.setProperty('display','flex','important');"
+        "lk.style.setProperty('align-items','center','important');"
+        "lk.style.setProperty('background','transparent','important');"
+        "var img=doc.createElement('img');img.src=dE()?LE:LC;"
+        "img.className='ig2p-logo-sidebar';"
+        "img.style.cssText='width:130px;height:auto;cursor:pointer;display:block;margin:4px 0;';"
+        "var mq=window.parent.matchMedia('(prefers-color-scheme:dark)');"
+        "function up(){img.src=dE()?LE:LC;}"
+        "if(mq.addEventListener)mq.addEventListener('change',up);"
+        "lk.insertBefore(img,lk.firstChild);"
+        "});"
+        "}catch(e){}_busy=false;}"
+        "run();setTimeout(run,50);setTimeout(run,200);setTimeout(run,600);"
+        "try{if(window.parent._ig2p_obs)window.parent._ig2p_obs.disconnect();"
+        "var _ob=new MutationObserver(function(){run();});"
+        "_ob.observe(window.parent.document.body,{childList:true,subtree:true});"
+        "window.parent._ig2p_obs=_ob;}catch(e){}"
+        "})()</script>"
+    )
+if _logo_escuro or _logo_claro:
+    _html_iframe(_js_sidebar_conv(_logo_escuro, _logo_claro), height=0)
 
 setor = st.session_state.setor
 
@@ -294,8 +406,8 @@ setor = st.session_state.setor
 # ─────────────────────────────────────────────────────────────────────────────
 # VISÃO GERAL (consolidado do Relatório + panorama de todas as fontes)
 # ─────────────────────────────────────────────────────────────────────────────
-if setor == "Visão Geral":
-    st.title(f"🏛️ {MUNICIPIO} — Convênios & Emendas · Visão Geral")
+if setor == "Visão Macro":
+    st.title(f"🏛️ {MUNICIPIO} — Convênios & Emendas · Visão Macro")
     st.markdown("---")
 
     rel = DADOS.get("relatorio", pd.DataFrame())
@@ -315,6 +427,11 @@ if setor == "Visão Geral":
              ("Contrapartida", formar_real(tot_con)),
              ("Depositado", formar_real(tot_dep)),
              ("Saldo", formar_real(tot_sal))])
+
+    taxa_exec = (tot_rec / tot_rep * 100) if tot_rep > 0 else 0.0
+    st.metric("Taxa de Execução (Recebido / Repasse)",
+              f"{taxa_exec:.1f}%".replace(".", ","),
+              help="Percentual do repasse que já foi efetivamente recebido.")
 
     if not rel.empty and "FONTE" in rel.columns:
         st.markdown("---")
@@ -366,6 +483,55 @@ if setor == "Visão Geral":
             st.metric("Captação Total (bruta)", formar_real(do["Valor"].sum()))
             for _, r in do.iterrows():
                 st.caption(f"**{r['Origem']}**: {formar_real(r['Valor'])}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONVÊNIO A CONVÊNIO — detalhe individual + taxa de execução (aba Relatório)
+# ─────────────────────────────────────────────────────────────────────────────
+if setor == "Convênio a Convênio":
+    st.title(f"🔎 {MUNICIPIO} — Convênio a Convênio")
+    st.markdown("---")
+    rel = DADOS.get("relatorio", pd.DataFrame())
+    if not rel.empty and "FONTE" in rel.columns:
+        rel = rel[rel["FONTE"].astype(str).str.strip().isin(
+            ["FEDERAL", "E. FEDERAL", "ESTADUAL", "E. ESTADUAL"])].copy()
+    if rel.empty:
+        st.info("Sem dados de convênios na aba Relatório.")
+    else:
+        rel["_rep"] = rel["R$ REPASSE"].apply(_m) if "R$ REPASSE" in rel.columns else 0.0
+        rel["_rec"] = rel["R$ RECEBIDO"].apply(_m) if "R$ RECEBIDO" in rel.columns else 0.0
+        rel["_sal"] = rel["SALDO"].apply(_m) if "SALDO" in rel.columns else 0.0
+        rel["_taxa"] = rel.apply(lambda r: (r["_rec"] / r["_rep"] * 100) if r["_rep"] > 0 else 0.0, axis=1)
+
+        taxa_media = (rel["_rec"].sum() / rel["_rep"].sum() * 100) if rel["_rep"].sum() > 0 else 0.0
+        kpi_row([("Nº de Convênios", str(len(rel))),
+                 ("Repasse Total", formar_real(rel["_rep"].sum())),
+                 ("Recebido", formar_real(rel["_rec"].sum())),
+                 ("Taxa de Execução Média", f"{taxa_media:.1f}%".replace(".", ","))])
+
+        st.markdown("---")
+        st.subheader("Taxa de Execução por Convênio (Recebido / Repasse)")
+        rr = rel.sort_values("_taxa", ascending=True).copy()
+        rotulo = ("Nº CONVÊNIO" if "Nº CONVÊNIO" in rr.columns else None)
+        rr["_lbl"] = (rr[rotulo].astype(str).str.strip() + " · " +
+                      rr.get("OBJETO", pd.Series([""] * len(rr))).astype(str).str.strip().str[:28]) \
+                     if rotulo else rr.get("OBJETO", pd.Series(range(len(rr)))).astype(str)
+        fig = px.bar(rr, x="_taxa", y="_lbl", orientation="h",
+                     color="_taxa", color_continuous_scale=["#860000", "#f39c12", "#2ea043"],
+                     range_color=[0, 100])
+        fig.update_layout(height=max(360, 30 * len(rr)), separators=",.",
+                          xaxis_title="Taxa de Execução (%)", yaxis_title="",
+                          coloraxis_showscale=False, margin=dict(t=20, b=30))
+        fig.update_traces(hovertemplate="<b>%{y}</b><br>Execução: %{x:.1f}%<extra></extra>")
+        st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
+
+        st.markdown("---")
+        st.markdown("##### 📋 Detalhamento por Convênio")
+        det = rel.copy()
+        det["Taxa Execução"] = det["_taxa"].apply(lambda x: f"{x:.1f}%".replace(".", ","))
+        cols_show = [c for c in ["FONTE", "Nº CONVÊNIO", "OBJETO", "R$ REPASSE",
+                                 "R$ RECEBIDO", "SALDO", "Taxa Execução"] if c in det.columns]
+        st.dataframe(det[cols_show], use_container_width=True, hide_index=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

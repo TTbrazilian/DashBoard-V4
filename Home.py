@@ -443,9 +443,17 @@ if setor:
     n_cols = calcular_colunas(len(nomes))
 
     # Larguras das colunas: [padding_esq, muni×n, padding_dir]
-    PAD    = 0.05
-    C_W    = (1.0 - 2 * PAD) / n_cols
-    widths = [PAD] + [C_W] * n_cols + [PAD]
+    # Quando há poucos municípios (< 5), fixa a largura do card no mesmo tamanho
+    # de uma linha "cheia" de 5 e centraliza — evita o card esticar a linha toda.
+    if n_cols < 5:
+        C_W    = (1.0 - 2 * 0.05) / 5          # largura de 1 card numa linha de 5 (padrão)
+        n_cols = len(nomes)
+        side   = max((1.0 - n_cols * C_W) / 2, 0.02)
+        widths = [side] + [C_W] * n_cols + [side]
+    else:
+        PAD    = 0.05
+        C_W    = (1.0 - 2 * PAD) / n_cols
+        widths = [PAD] + [C_W] * n_cols + [PAD]
 
     # Dividir em linhas e renderizar cada row com st.columns() flat (sem wrapper)
     rows = [nomes[i : i + n_cols] for i in range(0, len(nomes), n_cols)]
