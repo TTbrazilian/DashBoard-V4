@@ -1,0 +1,24 @@
+# ============================================================
+# iG2P — arquivos que NUNCA devem ir para o Git
+# ============================================================
+
+# Segredos do Streamlit
+secrets.toml
+.streamlit/secrets.toml
+
+# Credenciais da Service Account (JSON do Google Cloud)
+*.json
+
+# Python / cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Ambientes virtuais
+.venv/
+venv/
+env/
+
+# Sistema / editor
+.DS_Store
+.vscode/

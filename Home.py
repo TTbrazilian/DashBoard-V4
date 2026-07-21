@@ -66,6 +66,12 @@ P_SAU = (                                      # Cruz médica
     "%3Cline x1='12' y1='7' x2='12' y2='17'/%3E"
     "%3Cline x1='7' y1='12' x2='17' y2='12'/%3E"
 )
+P_CON = (                                      # Documento / convênio
+    "%3Cpath d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/%3E"
+    "%3Cpolyline points='14 2 14 8 20 8'/%3E"
+    "%3Cline x1='8' y1='13' x2='16' y2='13'/%3E"
+    "%3Cline x1='8' y1='17' x2='13' y2='17'/%3E"
+)
 
 GRAY  = "#94A3B8"
 GREEN = "#2ECC71"
@@ -74,9 +80,15 @@ EDU_GRAY  = svg(P_EDU, GRAY)
 EDU_GREEN = svg(P_EDU, GREEN)
 SAU_GRAY  = svg(P_SAU, GRAY)
 SAU_GREEN = svg(P_SAU, GREEN)
+CON_GRAY  = svg(P_CON, GRAY)
+CON_GREEN = svg(P_CON, GREEN)
 
-MUNI_DEFAULT = SAU_GRAY  if setor == "Saúde" else EDU_GRAY
-MUNI_HOVER   = SAU_GREEN if setor == "Saúde" else EDU_GREEN
+if setor == "Saúde":
+    MUNI_DEFAULT, MUNI_HOVER = SAU_GRAY, SAU_GREEN
+elif setor == "Convênios":
+    MUNI_DEFAULT, MUNI_HOVER = CON_GRAY, CON_GREEN
+else:
+    MUNI_DEFAULT, MUNI_HOVER = EDU_GRAY, EDU_GREEN
 
 # ── 6. ÂNCORA ÚNICA NA LINHA DE SETOR ────────────────────────────────────────
 # Injetamos <span id="ig2p-sector-anchor"> dentro da coluna col_edu.
@@ -95,6 +107,7 @@ SB = "div[data-testid='stButton']"
 # Seletores precisos
 EDU_BTN  = f"{S}{HAS_SEC} > {SC}:nth-child(2) button"
 SAU_BTN  = f"{S}{HAS_SEC} > {SC}:nth-child(4) button"
+CONV_BTN = f"{S}{HAS_SEC} > {SC}:nth-child(6) button"
 MUNI_BTN = f"{S}{NOT_SEC} {SB} button"
 
 # ── 7. CSS DO ESTADO ATIVO (gerado por Python — vazio se nenhum clicado) ──────
@@ -123,6 +136,19 @@ elif setor == "Saúde":
   }}
   {SAU_BTN}::before {{
     background-image: url("{SAU_GREEN}") !important;
+    background-color: rgba(46,204,113,0.12) !important;
+  }}"""
+elif setor == "Convênios":
+    active_css = f"""
+  {CONV_BTN} {{
+    border-color: {GREEN} !important;
+    background: #162B1F !important;
+    box-shadow: 0 0 0 3px rgba(46,204,113,0.18),
+                0 14px 36px rgba(46,204,113,0.16) !important;
+    color: #ffffff !important;
+  }}
+  {CONV_BTN}::before {{
+    background-image: url("{CON_GREEN}") !important;
     background-color: rgba(46,204,113,0.12) !important;
   }}"""
 
@@ -169,7 +195,8 @@ st.markdown(f"""
 
   /* Base cinza — AMBOS os cards antes de qualquer clique */
   {EDU_BTN},
-  {SAU_BTN} {{
+  {SAU_BTN},
+  {CONV_BTN} {{
     width: 100% !important; height: 200px !important; padding: 0 !important;
     background: #1E293B !important;
     border: 1.5px solid rgba(148,163,184,0.13) !important;
@@ -193,7 +220,8 @@ st.markdown(f"""
 
   /* Ícone via ::before (aparece acima do texto naturalmente no flex-column) */
   {EDU_BTN}::before,
-  {SAU_BTN}::before {{
+  {SAU_BTN}::before,
+  {CONV_BTN}::before {{
     content: '' !important; display: block !important; flex-shrink: 0 !important;
     width: 62px !important; height: 62px !important;
     border-radius: 15px !important;
@@ -208,10 +236,12 @@ st.markdown(f"""
   /* Ícones corretos (cinza) */
   {EDU_BTN}::before {{ background-image: url("{EDU_GRAY}") !important; }}
   {SAU_BTN}::before {{ background-image: url("{SAU_GRAY}") !important; }}
+  {CONV_BTN}::before {{ background-image: url("{CON_GRAY}") !important; }}
 
   /* Hover — previa esverdeada SEM confirmar seleção */
   {EDU_BTN}:hover,
-  {SAU_BTN}:hover {{
+  {SAU_BTN}:hover,
+  {CONV_BTN}:hover {{
     border-color: rgba(46,204,113,0.38) !important;
     background: #1A2A20 !important;
     transform: translateY(-3px) !important;
@@ -224,6 +254,10 @@ st.markdown(f"""
   }}
   {SAU_BTN}:hover::before {{
     background-image: url("{SAU_GREEN}") !important;
+    background-color: rgba(46,204,113,0.10) !important;
+  }}
+  {CONV_BTN}:hover::before {{
+    background-image: url("{CON_GREEN}") !important;
     background-color: rgba(46,204,113,0.10) !important;
   }}
 
@@ -357,7 +391,7 @@ st.markdown('<p class="sector-label">Selecione o Setor</p>', unsafe_allow_html=T
 
 # ── 11. CARD-BUTTONS DOS SETORES ─────────────────────────────────────────────
 
-_, col_edu, _gap, col_sau, _ = st.columns([2.2, 1.4, 0.12, 1.4, 2.2])
+_, col_edu, _gap, col_sau, _gap2, col_conv, _ = st.columns([1.5, 1.4, 0.12, 1.4, 0.12, 1.4, 1.5])
 
 with col_edu:
     # 1º: O botão (para alinhar com o topo da coluna ao lado)
@@ -371,6 +405,11 @@ with col_edu:
 with col_sau:
     if st.button("Saúde", key="btn_saude", use_container_width=True):
         st.session_state["setor_ativo"] = "Saúde"
+        st.rerun()
+
+with col_conv:
+    if st.button("Convênios", key="btn_convenios", use_container_width=True):
+        st.session_state["setor_ativo"] = "Convênios"
         st.rerun()
 
 # ── 12. GRADE DE MUNICÍPIOS (layout FLAT — sem aninhamento de st.columns) ─────
@@ -394,9 +433,12 @@ if setor:
             "São Roque de Minas", "São Tomás de Aquino", "Itamogi",
         ]
         suffix = "Educação"
-    else:
+    elif setor == "Saúde":
         nomes  = ["Alpinópolis", "Bom Jesus da Penha", "Cássia", "Delfinópolis", "Itaú de Minas"]
         suffix = "Saúde"
+    else:  # Convênios
+        nomes  = ["Alpinópolis"]
+        suffix = "Convênios"
 
     n_cols = calcular_colunas(len(nomes))
 
