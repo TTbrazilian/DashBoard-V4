@@ -713,7 +713,7 @@ if df_raw is not None:
         with c1: st.metric("Total Receitas Vinculadas", formar_real(tot_rec))
         with c2: st.metric("Total Despesas Vinculadas", formar_real(tot_desp))
         with c3: st.metric("Saldo (Rec. − Desp.)", formar_real(tot_rec - tot_desp))
-        fig.update_layout(barmode='relative', height=470, separators=',.',
+        fig.update_layout(barmode='relative', height=450, separators=',.',
                           yaxis_title="R$", xaxis_title="",
                           legend_title="Receitas (azul) × Despesas (fonte)",
                           legend=dict(orientation="h", yanchor="bottom", y=-0.28,
