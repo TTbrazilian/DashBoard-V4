@@ -28,7 +28,7 @@ CONFIG_PT = {'displaylogo': False, 'showTips': False}
 #      (ex.: "Cássia_Convênios.py", "Itaú de Minas_Convênios.py")
 #   2) adicionar 1 linha no secrets, em [convenios]:  "Cássia" = "<sheet_id>"
 # Nenhuma outra alteração é necessária.
-MUNICIPIO_FALLBACK = "Itaú de Minas"   # usado só se não for possível ler o nome do arquivo
+MUNICIPIO_FALLBACK = "Alpinópolis"   # usado só se não for possível ler o nome do arquivo
 
 def _detectar_municipio():
     try:
@@ -58,28 +58,39 @@ MUNICIPIO = _detectar_municipio()
 BANDEIRA_ARQUIVO = f"{MUNICIPIO}.png"      # troque aqui se usar outro nome de arquivo
 
 
+# IMPORTANTE: o cache é keyed pelos ARGUMENTOS. Como todas as páginas de
+# Convênios compartilham o mesmo processo, a função PRECISA receber o nome do
+# arquivo/município — senão a primeira página carregada serviria a sua bandeira
+# (e os seus dados) para todas as outras.
 @st.cache_data
-def _bandeira_b64():
+def _bandeira_b64(arquivo: str):
     """Lê o PNG da bandeira e devolve um data-URI. Vazio se não encontrar."""
     import base64
-    cands = [f"Logos/Bandeiras/{BANDEIRA_ARQUIVO}", f"../Logos/Bandeiras/{BANDEIRA_ARQUIVO}",
-             f"Logos/{BANDEIRA_ARQUIVO}", f"../Logos/{BANDEIRA_ARQUIVO}"]
+    # aceita "Itaú de Minas.png", "Itaú_de_Minas.png" e variações em minúsculas
+    nomes = []
+    for n in (arquivo, arquivo.replace(" ", "_"), arquivo.replace("_", " ")):
+        for v in (n, n.lower()):
+            if v not in nomes:
+                nomes.append(v)
+    pastas = ["Logos/Bandeiras", "../Logos/Bandeiras", "Logos", "../Logos"]
     try:
         d = os.path.dirname(__file__)
-        cands += [os.path.join(d, "Logos", "Bandeiras", BANDEIRA_ARQUIVO),
-                  os.path.join(d, "..", "Logos", "Bandeiras", BANDEIRA_ARQUIVO),
-                  os.path.join(d, "..", "Logos", BANDEIRA_ARQUIVO)]
+        pastas += [os.path.join(d, "Logos", "Bandeiras"),
+                   os.path.join(d, "..", "Logos", "Bandeiras"),
+                   os.path.join(d, "..", "Logos")]
     except NameError:
         pass
-    for p in cands:
-        if os.path.exists(p):
-            return "data:image/png;base64," + base64.b64encode(open(p, "rb").read()).decode()
+    for pasta in pastas:
+        for nome in nomes:
+            p = os.path.join(pasta, nome)
+            if os.path.exists(p):
+                return "data:image/png;base64," + base64.b64encode(open(p, "rb").read()).decode()
     return ""
 
 
 def _img_bandeira():
     """<img> da bandeira no tamanho de um emoji (height:1em, proporção mantida)."""
-    b = _bandeira_b64()
+    b = _bandeira_b64(BANDEIRA_ARQUIVO)
     if not b:
         return ""
     return ('<img src="' + b + '" alt="" style="height:1em;width:auto;'
@@ -211,13 +222,18 @@ def _sheet_id_do_municipio():
     return None
 
 
-@st.cache_data(ttl=600)
-def load_convenios():
-    """Retorna dict {chave: DataFrame} para cada aba. Sheets API → fallback CSV."""
+@st.cache_data(ttl=600, show_spinner=False)
+def load_convenios(municipio: str, sid: str):
+    """Retorna (dados, aviso). O cache é keyed por (município, sheet_id) — sem
+    isso, todas as páginas de Convênios compartilhariam o mesmo cache e a
+    primeira a carregar serviria os seus dados para as demais.
+    Nada de st.warning/st.info aqui dentro: chamadas de UI seriam gravadas no
+    cache e reexibidas na página errada. O aviso volta como texto."""
     dados = {}
+    aviso = ""
+    tem_credenciais = "gcp_service_account" in st.secrets
     # 1) Tenta Google Sheets (sheet_id específico do município)
-    sid = _sheet_id_do_municipio()
-    if "gcp_service_account" in st.secrets and sid:
+    if tem_credenciais and sid:
         try:
             gc = _conectar_sheets()
             for chave, aba in ABAS.items():
@@ -228,13 +244,13 @@ def load_convenios():
                     dados[chave] = _valores_para_df(ws.get_all_values())
                 except Exception:
                     dados[chave] = pd.DataFrame()
-            return dados
+            return dados, aviso
         except Exception as e:
-            st.warning(f"Falha ao ler Google Sheets ({type(e).__name__}: {e}). "
-                       "Tentando arquivos locais...")
-    elif "gcp_service_account" in st.secrets and not sid:
-        st.info(f"Defina o sheet_id de **{MUNICIPIO}** no secrets, em `[convenios]` "
-                f"(ex.: `\"{MUNICIPIO}\" = \"<id_da_planilha>\"`).")
+            aviso = (f"Falha ao ler o Google Sheets de {municipio} "
+                     f"({type(e).__name__}: {e}). Tentando arquivos locais...")
+    elif tem_credenciais and not sid:
+        aviso = (f"Defina o sheet_id de **{municipio}** no secrets, em `[convenios]` "
+                 f"(ex.: `\"{municipio}\" = \"<id_da_planilha>\"`).")
 
     # 2) Fallback CSV local — casa o arquivo pelo município + nome da aba,
     #    aceitando qualquer prefixo ("Emendas_-_X_-_Aba" ou "Convênios_X_-_Aba").
@@ -249,7 +265,7 @@ def load_convenios():
     def _norm(s):
         return re.sub(r"[\s_\-]+", "", str(s)).strip().lower()
 
-    alvo_mun = _norm(MUNICIPIO)
+    alvo_mun = _norm(municipio)
     for chave, aba in ABAS.items():
         alvo = _norm(aba)
         achado = None
@@ -267,7 +283,7 @@ def load_convenios():
             dados[chave] = _valores_para_df(valores)
         else:
             dados[chave] = pd.DataFrame()
-    return dados
+    return dados, aviso
 
 
 def _linhas_validas(df):
@@ -342,6 +358,30 @@ def barras_por(df, coluna, valor_col, titulo, cor=C_FED, topn=None, horizontal=T
     st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
 
 
+def _abrev(texto, n=44):
+    """Abrevia mantendo palavras inteiras e sinaliza o corte com reticências."""
+    t = " ".join(str(texto).split())
+    if len(t) <= n:
+        return t
+    corte = t[:n - 1]
+    if " " in corte[int(n * 0.6):]:
+        corte = corte[:corte.rstrip().rfind(" ")]
+    return corte.rstrip(" ,.;-") + "…"
+
+
+def _rotulos_unicos(labels):
+    """Evita que convênios de nome igual virem a MESMA barra no gráfico."""
+    vistos, saida = {}, []
+    for l in labels:
+        if l in vistos:
+            vistos[l] += 1
+            saida.append(f"{l} ({vistos[l]})")
+        else:
+            vistos[l] = 1
+            saida.append(l)
+    return saida
+
+
 def tabela_detalhe(df, colunas):
     cols = [c for c in colunas if c in df.columns]
     if df.empty or not cols:
@@ -404,7 +444,9 @@ if _logo_escuro or _logo_claro:
     """, unsafe_allow_html=True)
 
 
-DADOS = load_convenios()
+DADOS, _AVISO = load_convenios(MUNICIPIO, _sheet_id_do_municipio() or "")
+if _AVISO:
+    st.info(_AVISO)
 
 if "setor" not in st.session_state:
     st.session_state.setor = "Visão Macro"
@@ -643,17 +685,22 @@ if setor == "Convênio a Convênio":
 
             st.markdown("---")
             st.subheader("Repasse por Convênio")
-            cc["_lbl"] = (cc["Nº do Convênio"].str.strip() + " · " +
-                          cc["Objeto"].str.strip().str[:32])
+            # nome COMPLETO no hover; no eixo, abreviação com reticências
+            cc["_full"] = (cc["Nº do Convênio"].str.strip() + " · " +
+                           cc["Objeto"].str.strip()).str.strip(" ·")
+            cc["_lbl"] = _rotulos_unicos([_abrev(x) for x in cc["_full"]])
             gg = cc[cc["_rep"] > 0].sort_values("_rep", ascending=True)
             if not gg.empty:
                 fig = px.bar(gg, x="_rep", y="_lbl", orientation="h", color="Origem",
-                             color_discrete_map={"Federal": C_FED, "Estadual": C_EST})
-                fig.update_layout(height=max(360, 30 * len(gg)), separators=",.",
+                             color_discrete_map={"Federal": C_FED, "Estadual": C_EST},
+                             custom_data=["_full"])
+                fig.update_layout(height=max(360, 34 * len(gg)), separators=",.",
                                   xaxis_tickprefix="R$ ", xaxis_title="", yaxis_title="",
+                                  yaxis=dict(automargin=True),
                                   legend=dict(orientation="h", y=-0.12),
                                   margin=dict(t=20, b=40))
-                fig.update_traces(hovertemplate="<b>%{y}</b><br>Repasse: R$ %{x:,.2f}<extra></extra>")
+                fig.update_traces(hovertemplate=("<b>%{customdata[0]}</b><br>"
+                                                 "Repasse: R$ %{x:,.2f}<extra></extra>"))
                 st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
 
             st.markdown("---")
@@ -681,16 +728,21 @@ if setor == "Convênio a Convênio":
         st.subheader("Taxa de Execução por Convênio (Recebido / Repasse)")
         rr = rel.sort_values("_taxa", ascending=True).copy()
         rotulo = ("Nº CONVÊNIO" if "Nº CONVÊNIO" in rr.columns else None)
-        rr["_lbl"] = (rr[rotulo].astype(str).str.strip() + " · " +
-                      rr.get("OBJETO", pd.Series([""] * len(rr))).astype(str).str.strip().str[:28]) \
-                     if rotulo else rr.get("OBJETO", pd.Series(range(len(rr)))).astype(str)
+        _obj = rr.get("OBJETO", pd.Series([""] * len(rr))).astype(str).str.strip()
+        rr["_full"] = ((rr[rotulo].astype(str).str.strip() + " · " + _obj).str.strip(" ·")
+                       if rotulo else _obj)
+        rr["_lbl"] = _rotulos_unicos([_abrev(x) for x in rr["_full"]])
         fig = px.bar(rr, x="_taxa", y="_lbl", orientation="h",
                      color="_taxa", color_continuous_scale=["#860000", "#f39c12", "#2ea043"],
-                     range_color=[0, 100])
-        fig.update_layout(height=max(360, 30 * len(rr)), separators=",.",
+                     range_color=[0, 100], custom_data=["_full", "_rep", "_rec"])
+        fig.update_layout(height=max(360, 34 * len(rr)), separators=",.",
                           xaxis_title="Taxa de Execução (%)", yaxis_title="",
+                          yaxis=dict(automargin=True),
                           coloraxis_showscale=False, margin=dict(t=20, b=30))
-        fig.update_traces(hovertemplate="<b>%{y}</b><br>Execução: %{x:.1f}%<extra></extra>")
+        fig.update_traces(hovertemplate=("<b>%{customdata[0]}</b><br>"
+                                         "Execução: %{x:.1f}%<br>"
+                                         "Repasse: R$ %{customdata[1]:,.2f}<br>"
+                                         "Recebido: R$ %{customdata[2]:,.2f}<extra></extra>"))
         st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
 
         st.markdown("---")
@@ -707,7 +759,7 @@ if setor == "Convênio a Convênio":
 # ─────────────────────────────────────────────────────────────────────────────
 def render_convenios(chave, titulo, dim_orgao, cor):
     df = _linhas_validas(DADOS.get(chave, pd.DataFrame()))
-    titulo_pagina(titulo)
+    titulo_pagina(f"{MUNICIPIO} — {titulo}")
     st.markdown("---")
     if df.empty:
         st.info("Sem dados nesta aba.")
@@ -764,7 +816,7 @@ if setor == "Convênios Estaduais":
 # ─────────────────────────────────────────────────────────────────────────────
 def render_emendas(chave, titulo, dim_orgao, cor):
     df = _linhas_validas(DADOS.get(chave, pd.DataFrame()))
-    titulo_pagina(titulo)
+    titulo_pagina(f"{MUNICIPIO} — {titulo}")
     st.markdown("---")
     if df.empty:
         st.info("Sem dados nesta aba.")
@@ -823,7 +875,7 @@ if setor == "Emendas Especiais Estaduais":
 # MDS
 # ─────────────────────────────────────────────────────────────────────────────
 if setor == "MDS":
-    titulo_pagina("Emendas MDS")
+    titulo_pagina(f"{MUNICIPIO} — Emendas MDS")
     st.markdown("---")
     df = DADOS.get("mds", pd.DataFrame())
     if not df.empty and "Valor" in df.columns:
