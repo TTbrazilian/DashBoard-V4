@@ -28,7 +28,7 @@ CONFIG_PT = {'displaylogo': False, 'showTips': False}
 #      (ex.: "Cássia_Convênios.py", "Itaú de Minas_Convênios.py")
 #   2) adicionar 1 linha no secrets, em [convenios]:  "Cássia" = "<sheet_id>"
 # Nenhuma outra alteração é necessária.
-MUNICIPIO_FALLBACK = "Alpinópolis"   # usado só se não for possível ler o nome do arquivo
+MUNICIPIO_FALLBACK = "Itaú_de_Minas"   # usado só se não for possível ler o nome do arquivo
 
 def _detectar_municipio():
     try:
