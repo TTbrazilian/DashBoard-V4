@@ -41,6 +41,57 @@ def _detectar_municipio():
 
 MUNICIPIO = _detectar_municipio()
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# BANDEIRA DO MUNICÍPIO (substitui os ícones/emojis dos cabeçalhos)
+# ──────────────────────────────────────────────────────────────────────────────
+# >>>>>>>>>>>>>>>>>>>>  COLOQUE A BANDEIRA AQUI  <<<<<<<<<<<<<<<<<<<<
+# Salve o PNG da bandeira em:   Logos/Bandeiras/<Município>.png
+#     exemplo:                  Logos/Bandeiras/Alpinópolis.png
+# É só isso — o arquivo é localizado automaticamente pelo nome do município.
+# Enquanto a imagem não existir, o cabeçalho aparece apenas com o texto
+# (sem ícone e sem imagem quebrada).
+# A bandeira é exibida com ALTURA DE 1em, ou seja, exatamente o tamanho do
+# texto/emoji do título, e largura automática — mantém a proporção original
+# e nunca estoura a grade do layout.
+# ══════════════════════════════════════════════════════════════════════════════
+BANDEIRA_ARQUIVO = f"{MUNICIPIO}.png"      # troque aqui se usar outro nome de arquivo
+
+
+@st.cache_data
+def _bandeira_b64():
+    """Lê o PNG da bandeira e devolve um data-URI. Vazio se não encontrar."""
+    import base64
+    cands = [f"Logos/Bandeiras/{BANDEIRA_ARQUIVO}", f"../Logos/Bandeiras/{BANDEIRA_ARQUIVO}",
+             f"Logos/{BANDEIRA_ARQUIVO}", f"../Logos/{BANDEIRA_ARQUIVO}"]
+    try:
+        d = os.path.dirname(__file__)
+        cands += [os.path.join(d, "Logos", "Bandeiras", BANDEIRA_ARQUIVO),
+                  os.path.join(d, "..", "Logos", "Bandeiras", BANDEIRA_ARQUIVO),
+                  os.path.join(d, "..", "Logos", BANDEIRA_ARQUIVO)]
+    except NameError:
+        pass
+    for p in cands:
+        if os.path.exists(p):
+            return "data:image/png;base64," + base64.b64encode(open(p, "rb").read()).decode()
+    return ""
+
+
+def _img_bandeira():
+    """<img> da bandeira no tamanho de um emoji (height:1em, proporção mantida)."""
+    b = _bandeira_b64()
+    if not b:
+        return ""
+    return ('<img src="' + b + '" alt="" style="height:1em;width:auto;'
+            'vertical-align:-0.12em;margin-right:.35em;border-radius:3px;'
+            'object-fit:contain;">')
+
+
+def titulo_pagina(texto):
+    """Cabeçalho da página: bandeira do município + texto (sem emojis)."""
+    st.markdown('<h1 style="margin:0 0 .25em 0;">' + _img_bandeira() + texto + '</h1>',
+                unsafe_allow_html=True)
+
 # Nomes EXATOS das abas (refletem os arquivos CSV). Atenção a espaços!
 ABAS = {
     "conv_fed":  "Convênios Federais ",
@@ -352,7 +403,9 @@ DADOS = load_convenios()
 if "setor" not in st.session_state:
     st.session_state.setor = "Visão Macro"
 
-st.sidebar.title("🤝 Convênios & Emendas")
+st.sidebar.markdown('<h2 style="margin:0 0 .2em 0;font-size:1.35rem;">'
+                    + _img_bandeira() + 'Convênios &amp; Emendas</h2>',
+                    unsafe_allow_html=True)
 st.sidebar.caption(f"Município: {MUNICIPIO}")
 st.sidebar.markdown("---")
 for label in ["Visão Macro", "Convênio a Convênio", "Convênios Federais", "Convênios Estaduais",
@@ -432,7 +485,7 @@ setor = st.session_state.setor
 # VISÃO GERAL (consolidado do Relatório + panorama de todas as fontes)
 # ─────────────────────────────────────────────────────────────────────────────
 if setor == "Visão Macro":
-    st.title(f"🏛️ {MUNICIPIO} — Convênios & Emendas · Visão Macro")
+    titulo_pagina(f"{MUNICIPIO} — Convênios &amp; Emendas · Visão Macro")
     st.markdown("---")
 
     rel = DADOS.get("relatorio", pd.DataFrame())
@@ -514,7 +567,7 @@ if setor == "Visão Macro":
 # CONVÊNIO A CONVÊNIO — detalhe individual + taxa de execução (aba Relatório)
 # ─────────────────────────────────────────────────────────────────────────────
 if setor == "Convênio a Convênio":
-    st.title(f"🔎 {MUNICIPIO} — Convênio a Convênio")
+    titulo_pagina(f"{MUNICIPIO} — Convênio a Convênio")
     st.markdown("---")
     rel = DADOS.get("relatorio", pd.DataFrame())
     if not rel.empty and "FONTE" in rel.columns:
@@ -564,7 +617,7 @@ if setor == "Convênio a Convênio":
 # ─────────────────────────────────────────────────────────────────────────────
 def render_convenios(chave, titulo, dim_orgao, cor):
     df = _linhas_validas(DADOS.get(chave, pd.DataFrame()))
-    st.title(f"{titulo}")
+    titulo_pagina(titulo)
     st.markdown("---")
     if df.empty:
         st.info("Sem dados nesta aba.")
@@ -610,10 +663,10 @@ def render_convenios(chave, titulo, dim_orgao, cor):
 
 
 if setor == "Convênios Federais":
-    render_convenios("conv_fed", "🇧🇷 Convênios Federais", "Ministério", C_FED)
+    render_convenios("conv_fed", "Convênios Federais", "Ministério", C_FED)
 
 if setor == "Convênios Estaduais":
-    render_convenios("conv_est", "🏛️ Convênios Estaduais", "Secretaria", C_EST)
+    render_convenios("conv_est", "Convênios Estaduais", "Secretaria", C_EST)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -621,7 +674,7 @@ if setor == "Convênios Estaduais":
 # ─────────────────────────────────────────────────────────────────────────────
 def render_emendas(chave, titulo, dim_orgao, cor):
     df = _linhas_validas(DADOS.get(chave, pd.DataFrame()))
-    st.title(titulo)
+    titulo_pagina(titulo)
     st.markdown("---")
     if df.empty:
         st.info("Sem dados nesta aba.")
@@ -670,17 +723,17 @@ def render_emendas(chave, titulo, dim_orgao, cor):
 
 
 if setor == "Emendas Especiais Federais":
-    render_emendas("emen_fed", "📋 Emendas Especiais Federais", "Ministério", C_FED)
+    render_emendas("emen_fed", "Emendas Especiais Federais", "Ministério", C_FED)
 
 if setor == "Emendas Especiais Estaduais":
-    render_emendas("emen_est", "📋 Emendas Especiais Estaduais", "Secretaria", C_EST)
+    render_emendas("emen_est", "Emendas Especiais Estaduais", "Secretaria", C_EST)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MDS
 # ─────────────────────────────────────────────────────────────────────────────
 if setor == "MDS":
-    st.title("🤝 Emendas MDS")
+    titulo_pagina("Emendas MDS")
     st.markdown("---")
     df = DADOS.get("mds", pd.DataFrame())
     if not df.empty and "Valor" in df.columns:
