@@ -221,13 +221,8 @@ def load_convenios():
         try:
             gc = _conectar_sheets()
             for chave, aba in ABAS.items():
-                # Aba ausente nesta planilha (ex.: municípios sem "Relatório")
-                # não pode derrubar a página inteira → vira DataFrame vazio.
-                try:
-                    ws = _abrir_aba(gc, sid, aba)
-                    dados[chave] = _valores_para_df(ws.get_all_values())
-                except Exception:
-                    dados[chave] = pd.DataFrame()
+                ws = _abrir_aba(gc, sid, aba)
+                dados[chave] = _valores_para_df(ws.get_all_values())
             return dados
         except Exception as e:
             st.warning(f"Falha ao ler Google Sheets ({type(e).__name__}: {e}). "
@@ -236,18 +231,17 @@ def load_convenios():
         st.info(f"Defina o sheet_id de **{MUNICIPIO}** no secrets, em `[convenios]` "
                 f"(ex.: `\"{MUNICIPIO}\" = \"<id_da_planilha>\"`).")
 
-    # 2) Fallback CSV local — casa o arquivo pelo município + nome da aba,
-    #    aceitando qualquer prefixo ("Emendas_-_X_-_Aba" ou "Convênios_X_-_Aba").
+    # 2) Fallback CSV local — casa o arquivo pela aba normalizando espaços/underscores
     import glob
-    arquivos = glob.glob("zConvenios/*.csv") + glob.glob("*.csv")
+    arquivos = glob.glob("zConvenios/Emendas_*.csv") + glob.glob("Emendas_*.csv")
     try:
         d = os.path.dirname(__file__)
-        arquivos += glob.glob(os.path.join(d, "zConvenios", "*.csv"))
+        arquivos += glob.glob(os.path.join(d, "zConvenios", "Emendas_*.csv"))
     except NameError:
         pass
 
     def _norm(s):
-        return re.sub(r"[\s_\-]+", "", str(s)).strip().lower()
+        return re.sub(r"[\s_]+", "", str(s)).strip().lower()
 
     alvo_mun = _norm(MUNICIPIO)
     for chave, aba in ABAS.items():
@@ -255,8 +249,8 @@ def load_convenios():
         achado = None
         for p in arquivos:
             base = os.path.basename(p).replace(".csv", "")
-            mm = re.match(r"^(.*)_-_(.*)$", base)       # último '_-_': (prefixo+município)(aba)
-            if not mm or alvo_mun not in _norm(mm.group(1)):
+            mm = re.match(r"^Emendas_-_(.*?)_-_(.*)$", base)  # (município)(aba)
+            if not mm or _norm(mm.group(1)) != alvo_mun:
                 continue
             if _norm(mm.group(2)) == alvo:
                 achado = p
@@ -505,47 +499,17 @@ if setor == "Visão Macro":
     tot_rep = _s("R$ REPASSE"); tot_rec = _s("R$ RECEBIDO")
     tot_con = _s("R$ CONTRAPARTIDA"); tot_dep = _s("DEPOSITADO"); tot_sal = _s("SALDO")
 
-    if not rel.empty:
-        # Planilha COM aba Relatório (consolidado oficial)
-        st.subheader("Consolidado (aba Relatório)")
-        kpi_row([("Repasse Total", formar_real(tot_rep)),
-                 ("Recebido", formar_real(tot_rec)),
-                 ("Contrapartida", formar_real(tot_con)),
-                 ("Depositado", formar_real(tot_dep)),
-                 ("Saldo", formar_real(tot_sal))])
+    st.subheader("Consolidado (aba Relatório)")
+    kpi_row([("Repasse Total", formar_real(tot_rep)),
+             ("Recebido", formar_real(tot_rec)),
+             ("Contrapartida", formar_real(tot_con)),
+             ("Depositado", formar_real(tot_dep)),
+             ("Saldo", formar_real(tot_sal))])
 
-        taxa_exec = (tot_rec / tot_rep * 100) if tot_rep > 0 else 0.0
-        st.metric("Taxa de Execução (Recebido / Repasse)",
-                  f"{taxa_exec:.1f}%".replace(".", ","),
-                  help="Percentual do repasse que já foi efetivamente recebido.")
-    else:
-        # Planilha SEM aba Relatório → consolida direto das abas de origem
-        st.subheader("Consolidado")
-        st.caption("Esta planilha não possui a aba **Relatório**; os totais abaixo são "
-                   "calculados diretamente das abas de Convênios e Emendas.")
-
-        def _soma_aba(chave, coluna):
-            d = _linhas_validas(DADOS.get(chave, pd.DataFrame()))
-            return d[coluna].apply(_m).sum() if (not d.empty and coluna in d.columns) else 0.0
-
-        def _soma_saldo(chave):
-            d = _linhas_validas(DADOS.get(chave, pd.DataFrame()))
-            if d.empty:
-                return 0.0
-            c = next((c for c in d.columns if "saldo" in c.lower()), None)
-            return d[c].apply(_m).sum() if c else 0.0
-
-        rep_conv = _soma_aba("conv_fed", "Valor Repasse") + _soma_aba("conv_est", "Valor Repasse")
-        con_conv = _soma_aba("conv_fed", "Contrapartida") + _soma_aba("conv_est", "Contrapartida")
-        val_emen = (_soma_aba("emen_fed", "Valor") + _soma_aba("emen_est", "Valor")
-                    + _soma_aba("mds", "Valor"))
-        sal_tot  = sum(_soma_saldo(k) for k in ("conv_fed", "conv_est", "emen_fed", "emen_est"))
-
-        kpi_row([("Repasse — Convênios", formar_real(rep_conv)),
-                 ("Contrapartida", formar_real(con_conv)),
-                 ("Emendas (Fed. + Est. + MDS)", formar_real(val_emen)),
-                 ("Saldo em Conta", formar_real(sal_tot)),
-                 ("Captação Total", formar_real(rep_conv + val_emen))])
+    taxa_exec = (tot_rec / tot_rep * 100) if tot_rep > 0 else 0.0
+    st.metric("Taxa de Execução (Recebido / Repasse)",
+              f"{taxa_exec:.1f}%".replace(".", ","),
+              help="Percentual do repasse que já foi efetivamente recebido.")
 
     if not rel.empty and "FONTE" in rel.columns:
         st.markdown("---")
@@ -610,61 +574,7 @@ if setor == "Convênio a Convênio":
         rel = rel[rel["FONTE"].astype(str).str.strip().isin(
             ["FEDERAL", "E. FEDERAL", "ESTADUAL", "E. ESTADUAL"])].copy()
     if rel.empty:
-        # Sem aba Relatório → monta o convênio a convênio a partir das abas
-        # de Convênios Federais e Estaduais (sem taxa: não há "Recebido").
-        partes = []
-        for chave, origem in [("conv_fed", "Federal"), ("conv_est", "Estadual")]:
-            d = _linhas_validas(DADOS.get(chave, pd.DataFrame()))
-            if d.empty:
-                continue
-            col_saldo = next((c for c in d.columns if "saldo" in c.lower()), None)
-            p = pd.DataFrame({
-                "Origem": origem,
-                "Nº do Convênio": d.get("Nº do Convênio", pd.Series([""] * len(d))).astype(str),
-                "Objeto": d.get("Objeto", pd.Series([""] * len(d))).astype(str),
-                "Ano": d.get("Ano", pd.Series([""] * len(d))).astype(str),
-                "_rep": d["Valor Repasse"].apply(_m) if "Valor Repasse" in d.columns else 0.0,
-                "_con": d["Contrapartida"].apply(_m) if "Contrapartida" in d.columns else 0.0,
-                "_sal": d[col_saldo].apply(_m) if col_saldo else 0.0,
-            })
-            partes.append(p)
-        cc = pd.concat(partes, ignore_index=True) if partes else pd.DataFrame()
-
-        if cc.empty:
-            st.info("Sem convênios lançados para este município.")
-        else:
-            st.caption("Esta planilha não possui a aba **Relatório**; o detalhamento abaixo "
-                       "vem das abas de Convênios. A *taxa de execução* depende da coluna "
-                       "**Recebido** (exclusiva da aba Relatório) e por isso não é exibida aqui.")
-            kpi_row([("Nº de Convênios", str(len(cc))),
-                     ("Repasse Total", formar_real(cc["_rep"].sum())),
-                     ("Contrapartida", formar_real(cc["_con"].sum())),
-                     ("Saldo em Conta", formar_real(cc["_sal"].sum()))])
-
-            st.markdown("---")
-            st.subheader("Repasse por Convênio")
-            cc["_lbl"] = (cc["Nº do Convênio"].str.strip() + " · " +
-                          cc["Objeto"].str.strip().str[:32])
-            gg = cc[cc["_rep"] > 0].sort_values("_rep", ascending=True)
-            if not gg.empty:
-                fig = px.bar(gg, x="_rep", y="_lbl", orientation="h", color="Origem",
-                             color_discrete_map={"Federal": C_FED, "Estadual": C_EST})
-                fig.update_layout(height=max(360, 30 * len(gg)), separators=",.",
-                                  xaxis_tickprefix="R$ ", xaxis_title="", yaxis_title="",
-                                  legend=dict(orientation="h", y=-0.12),
-                                  margin=dict(t=20, b=40))
-                fig.update_traces(hovertemplate="<b>%{y}</b><br>Repasse: R$ %{x:,.2f}<extra></extra>")
-                st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
-
-            st.markdown("---")
-            st.markdown("##### 📋 Detalhamento por Convênio")
-            det = cc.copy()
-            det["Valor Repasse"] = det["_rep"].apply(formar_real)
-            det["Contrapartida"] = det["_con"].apply(formar_real)
-            det["Saldo em Conta"] = det["_sal"].apply(formar_real)
-            st.dataframe(det[["Origem", "Nº do Convênio", "Ano", "Objeto",
-                              "Valor Repasse", "Contrapartida", "Saldo em Conta"]],
-                         use_container_width=True, hide_index=True)
+        st.info("Sem dados de convênios na aba Relatório.")
     else:
         rel["_rep"] = rel["R$ REPASSE"].apply(_m) if "R$ REPASSE" in rel.columns else 0.0
         rel["_rec"] = rel["R$ RECEBIDO"].apply(_m) if "R$ RECEBIDO" in rel.columns else 0.0
