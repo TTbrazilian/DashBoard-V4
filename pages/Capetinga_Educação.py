@@ -225,6 +225,20 @@ if df_f_raw is not None and df_r is not None:
         if st.sidebar.button(label, use_container_width=True):
             st.session_state.setor = key
 
+    # ── FOCO NO TOPO ao trocar de setor/categoria (regra universal iG2P) ──
+    _ig2p_foco = f"{st.session_state.get('setor','')}|{st.session_state.get('modo','')}"
+    if st.session_state.get('_ig2p_foco') != _ig2p_foco:
+        st.session_state['_ig2p_foco'] = _ig2p_foco
+        _html_iframe(
+            "<script>(function(){try{"
+            "var w=window.parent,d=w.document;"
+            "var sels=['section.main','[data-testid=\"stMain\"]',"
+            "'[data-testid=\"stAppViewContainer\"]','[data-testid=\"stMainBlockContainer\"]'];"
+            "function top(){try{w.scrollTo(0,0);}catch(e){}"
+            "sels.forEach(function(s){var el=d.querySelector(s);if(el)el.scrollTop=0;});}"
+            "top();setTimeout(top,60);setTimeout(top,200);"
+            "}catch(e){}})()</script>", height=0)
+
     import base64 as _b64
 
     def _ler_logo(nome_arquivo):
@@ -264,7 +278,8 @@ if df_f_raw is not None and df_r is not None:
         'var nav=doc.querySelector(\'[data-testid="stSidebarNav"]\'  );'
         'if(!nav)return;'
         'nav.querySelectorAll(\'li\').forEach(function(it){'
-        'if(it.textContent.indexOf(\'Sa\u00fade\')!==-1){'
+        'var _t=it.textContent;'
+        'if(_t.indexOf(\'Sa\u00fade\')!==-1||_t.indexOf(\'Conv\u00ea\')!==-1){'
         'it.style.setProperty(\'display\',\'none\',\'important\');return;}'
         'var lk=it.querySelector(\'a\');if(!lk)return;'
         'var sp=lk.querySelector(\'span\');'

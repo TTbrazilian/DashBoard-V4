@@ -143,7 +143,7 @@ def load_all_data():
 
 df_f_raw, df_r, df_df_raw = load_all_data()
 
-meses_disponiveis = ['Janeiro','Fevereiro','Março','Abril', 'Maio']
+meses_disponiveis = ['Janeiro','Fevereiro','Março','Abril']
 
 if df_f_raw is not None and df_r is not None:
 
@@ -158,6 +158,20 @@ if df_f_raw is not None and df_r is not None:
                         ("Folha de Pagamento","Folha de Pagamento")]:
         if st.sidebar.button(label, use_container_width=True):
             st.session_state.setor = key
+
+    # ── FOCO NO TOPO ao trocar de setor/categoria (regra universal iG2P) ──
+    _ig2p_foco = f"{st.session_state.get('setor','')}|{st.session_state.get('modo','')}"
+    if st.session_state.get('_ig2p_foco') != _ig2p_foco:
+        st.session_state['_ig2p_foco'] = _ig2p_foco
+        _html_iframe(
+            "<script>(function(){try{"
+            "var w=window.parent,d=w.document;"
+            "var sels=['section.main','[data-testid=\"stMain\"]',"
+            "'[data-testid=\"stAppViewContainer\"]','[data-testid=\"stMainBlockContainer\"]'];"
+            "function top(){try{w.scrollTo(0,0);}catch(e){}"
+            "sels.forEach(function(s){var el=d.querySelector(s);if(el)el.scrollTop=0;});}"
+            "top();setTimeout(top,60);setTimeout(top,200);"
+            "}catch(e){}})()</script>", height=0)
 
     import base64 as _b64
 
@@ -205,7 +219,7 @@ if df_f_raw is not None and df_r is not None:
             "var _h=_a&&((_a.href||'').toLowerCase().indexOf('/home')!==-1||txt.trim().toLowerCase()==='home');"
             "if(!_h)ocultar=true;"
             "}"
-            "if(_sau&&temEduca)ocultar=true;"
+            "if(_sau&&(temEduca||txt.indexOf('Conv\u00ea')!==-1))ocultar=true;"
             "if(ocultar){it.style.setProperty('display','none','important');return;}"
             "it.style.removeProperty('display');"
             "var lk=it.querySelector('a');if(!lk)return;"
