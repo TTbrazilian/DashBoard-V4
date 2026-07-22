@@ -296,22 +296,10 @@ def tabela_detalhe(df, colunas):
 # ══════════════════════════════════════════════════════════════════════════════
 # INTERFACE
 # ══════════════════════════════════════════════════════════════════════════════
-DADOS = load_convenios()
-
-if "setor" not in st.session_state:
-    st.session_state.setor = "Visão Macro"
-
-st.sidebar.title("🤝 Convênios & Emendas")
-st.sidebar.caption(f"Município: {MUNICIPIO}")
-st.sidebar.markdown("---")
-for label in ["Visão Macro", "Convênio a Convênio", "Convênios Federais", "Convênios Estaduais",
-              "Emendas Especiais Federais", "Emendas Especiais Estaduais", "MDS"]:
-    if st.sidebar.button(label, use_container_width=True,
-                         type=("primary" if st.session_state.setor == label else "secondary")):
-        st.session_state.setor = label
-        st.rerun()
-
-# Logo iG2P na sidebar (injeção via iframe invisível)
+# ── LOGO + LOADER (regra universal iG2P) ─────────────────────────────────────
+# O loader é criado ANTES de qualquer carregamento pesado e só é removido no
+# FIM do script — assim ele cobre o tempo real de carregamento da página,
+# em paralelo com o indicador nativo do Streamlit.
 import base64 as _b64
 def _ler_logo(nome):
     cands = [f"Logos/{nome}", f"../Logos/{nome}"]
@@ -328,28 +316,65 @@ def _ler_logo(nome):
 _logo_escuro = _ler_logo("LOGOTIPO IG2P - OFICIAL - BRANCO.png")   # p/ fundo escuro
 _logo_claro  = _ler_logo("LOGOTIPO IG2P - OFICIAL.png")            # p/ fundo claro
 
-# ── LOADER central com logo (regra universal iG2P) — tema-aware, some sozinho ──
 if _logo_escuro or _logo_claro:
     st.markdown(f"""
-    <div class="ig2p-loader">
+    <div class="ig2p-loader" id="ig2p-loader">
       <img class="ig2p-logo-escuro" src="{_logo_escuro}">
       <img class="ig2p-logo-claro"  src="{_logo_claro}">
     </div>
     <style>
+      /* o container do markdown não pode ocupar espaço (evita "linha" no topo) */
+      [data-testid="stElementContainer"]:has(.ig2p-loader),
+      .element-container:has(.ig2p-loader) {{
+        height:0!important; min-height:0!important;
+        margin:0!important; padding:0!important;
+      }}
       .ig2p-loader {{ position:fixed; inset:0; z-index:99999; pointer-events:none;
         display:flex; align-items:center; justify-content:center;
-        background:#0E1117; animation: ig2pFade 0.9s ease forwards; }}
-      .ig2p-loader img {{ width:150px; height:auto; animation: ig2pPulse 0.9s ease-in-out infinite; }}
+        background:#0E1117; opacity:1; transition:opacity .45s ease; }}
+      .ig2p-loader.ig2p-done {{ opacity:0; visibility:hidden; }}
+      .ig2p-loader img {{ width:150px; height:auto;
+        animation: ig2pPulse 1.1s ease-in-out infinite; }}
       .ig2p-loader .ig2p-logo-claro {{ display:none; }}
       @media (prefers-color-scheme: light) {{
         .ig2p-loader {{ background:#FFFFFF; }}
         .ig2p-loader .ig2p-logo-escuro {{ display:none; }}
         .ig2p-loader .ig2p-logo-claro  {{ display:block; }}
       }}
-      @keyframes ig2pPulse {{ 0%,100%{{opacity:.35;transform:scale(.94)}} 50%{{opacity:1;transform:scale(1.04)}} }}
-      @keyframes ig2pFade {{ 0%,50%{{opacity:1;visibility:visible}} 100%{{opacity:0;visibility:hidden}} }}
+      @keyframes ig2pPulse {{ 0%,100%{{opacity:.35;transform:scale(.94)}}
+                              50%{{opacity:1;transform:scale(1.05)}} }}
     </style>
     """, unsafe_allow_html=True)
+
+
+DADOS = load_convenios()
+
+if "setor" not in st.session_state:
+    st.session_state.setor = "Visão Macro"
+
+st.sidebar.title("🤝 Convênios & Emendas")
+st.sidebar.caption(f"Município: {MUNICIPIO}")
+st.sidebar.markdown("---")
+for label in ["Visão Macro", "Convênio a Convênio", "Convênios Federais", "Convênios Estaduais",
+              "Emendas Especiais Federais", "Emendas Especiais Estaduais", "MDS"]:
+    if st.sidebar.button(label, use_container_width=True,
+                         type=("primary" if st.session_state.setor == label else "secondary")):
+        st.session_state.setor = label
+        st.rerun()
+
+# ── FOCO NO TOPO ao trocar de setor (regra universal iG2P) ──
+_ig2p_foco = str(st.session_state.get("setor", ""))
+if st.session_state.get("_ig2p_foco") != _ig2p_foco:
+    st.session_state["_ig2p_foco"] = _ig2p_foco
+    _html_iframe(
+        "<script>(function(){try{"
+        "var w=window.parent,d=w.document;"
+        "var sels=['section.main','[data-testid=\"stMain\"]',"
+        "'[data-testid=\"stAppViewContainer\"]','[data-testid=\"stMainBlockContainer\"]'];"
+        "function top(){try{w.scrollTo(0,0);}catch(e){}"
+        "sels.forEach(function(s){var el=d.querySelector(s);if(el)el.scrollTop=0;});}"
+        "top();setTimeout(top,60);setTimeout(top,200);"
+        "}catch(e){}})()</script>", height=0)
 
 # ── SIDEBAR: mostra só páginas de Convênios + logo como botão Home (regra universal) ──
 def _js_sidebar_conv(LE, LC):
@@ -670,3 +695,14 @@ if setor == "MDS":
         st.markdown("---")
         tabela_detalhe(df, ["Emendas MDS", "Ano", "Instituição Beneficiária",
                             "Valor", "Status Plano de Trabalho"])
+
+
+# ── FIM DO SCRIPT: libera o loader (a página terminou de renderizar) ──────────
+if _logo_escuro or _logo_claro:
+    _html_iframe(
+        "<script>(function(){try{"
+        "var d=window.parent.document;"
+        "function done(){var l=d.querySelectorAll('.ig2p-loader');"
+        "for(var i=0;i<l.length;i++){l[i].classList.add('ig2p-done');}}"
+        "done();setTimeout(done,80);"
+        "}catch(e){}})()</script>", height=0)
