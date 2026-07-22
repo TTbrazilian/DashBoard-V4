@@ -437,7 +437,7 @@ if setor:
         nomes  = ["Alpinópolis", "Bom Jesus da Penha", "Cássia", "Delfinópolis", "Itaú de Minas"]
         suffix = "Saúde"
     else:  # Convênios
-        nomes  = ["Alpinópolis"]
+        nomes  = ["Alpinópolis", "Itaú de Minas"]
         suffix = "Convênios"
 
     n_cols = calcular_colunas(len(nomes))
