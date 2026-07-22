@@ -716,7 +716,7 @@ if df_raw is not None:
         fig.update_layout(barmode='relative', height=470, separators=',.',
                           yaxis_title="R$", xaxis_title="",
                           legend_title="Receitas (azul) × Despesas (fonte)",
-                          legend=dict(orientation="h", yanchor="bottom", y=-0.30,
+                          legend=dict(orientation="h", yanchor="bottom", y=-0.35,
                                       xanchor="center", x=0.5), margin=dict(t=20,b=40))
         st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
         st.caption("Barra à esquerda de cada categoria = **Receitas Vinculadas** (Federal/Estadual); "
