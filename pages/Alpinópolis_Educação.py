@@ -133,7 +133,7 @@ def soma(df, cols):
 # • PTE: categoria 'Tranferência Programas Estaduais' no R file.
 # • Rendimentos bancários (Remunerações Bancárias): 4 linhas (PNAE, PNATE, PTE, QESE)
 #   → somados à receita de cada programa no gráfico; hover mostra Transferência + Rendimentos.
-# • meses_disponiveis = ['Janeiro','Fevereiro','Março','Abril'] (4 meses).
+# • meses_disponiveis = ['Janeiro','Fevereiro','Março','Abril', 'Maio'] (5 meses).
 # • Capital Liq = R$ 83.357,21 | Custeio = R$ 6.654.813,23
 # • FUNDEB 70% Liq = R$ 3.794.348,68 | FUNDEB 30% = R$ 808.885,98
 # • RP (15001+1500) Liq = R$ 1.818.989,22 | _desconto = 0,0
@@ -179,7 +179,7 @@ def load_all_data():
 
 df_f_raw, df_r, df_df_raw = load_all_data()
 
-meses_disponiveis = ['Janeiro','Fevereiro','Março','Abril']
+meses_disponiveis = ['Janeiro','Fevereiro','Março','Abril', 'Maio']
 
 if df_f_raw is not None and df_r is not None:
 
