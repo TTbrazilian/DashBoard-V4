@@ -764,7 +764,9 @@ def render_emendas(chave, titulo, dim_orgao, cor):
     if df.empty:
         st.info("Sem dados nesta aba.")
         return
-    tot = df["Valor"].apply(_m).sum() if "Valor" in df.columns else 0.0
+    # coluna de valor da emenda: "Repasse Pactuado" (padronizada) ou "Valor" (legada)
+    _cval = _primeira_col(df, COLS_REP_PACT)
+    tot = _col_soma(df, COLS_REP_PACT)
     col_saldo = next((c for c in df.columns if "saldo" in c.lower()), None)
     tot_sal = df[col_saldo].apply(_m).sum() if col_saldo else 0.0
     kpi_row([("Nº de Emendas", str(len(df))),
@@ -775,21 +777,21 @@ def render_emendas(chave, titulo, dim_orgao, cor):
 
     st.markdown("---")
     st.subheader("Valor por Parlamentar")
-    barras_por(df, "Parlamentar", "Valor", "Parlamentar", cor=cor, topn=15)
+    barras_por(df, "Parlamentar", _cval, "Parlamentar", cor=cor, topn=15)
 
     st.markdown("---")
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("Valor por Ano")
-        barras_por(df, "Ano", "Valor", "Ano", cor=cor, horizontal=False)
+        barras_por(df, "Ano", _cval, "Ano", cor=cor, horizontal=False)
     with c2:
         st.subheader(f"Valor por {dim_orgao}")
-        barras_por(df, dim_orgao, "Valor", dim_orgao, cor=cor)
+        barras_por(df, dim_orgao, _cval, dim_orgao, cor=cor)
 
     if "GND" in df.columns:
         st.markdown("---")
         st.subheader("Investimento × Custeio (GND)")
-        g = df.copy(); g["_v"] = g["Valor"].apply(_m)
+        g = df.copy(); g["_v"] = _col_series(g, COLS_REP_PACT)
         g = g[g["GND"].astype(str).str.strip().isin(["Investimento", "Custeio"])]
         gg = g.groupby("GND")["_v"].sum().reset_index()
         if not gg.empty:
@@ -803,7 +805,8 @@ def render_emendas(chave, titulo, dim_orgao, cor):
                 st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
 
     st.markdown("---")
-    tabela_detalhe(df, ["Parlamentar", dim_orgao, "Ano", "Objeto", "Valor",
+    tabela_detalhe(df, ["Parlamentar", dim_orgao, "Ano", "Objeto",
+                        "Repasse Pactuado", "Valor",
                         "GND", "Data Pagamento", "Status Plano de Trabalho"])
 
 
@@ -821,18 +824,19 @@ if setor == "MDS":
     titulo_pagina(f"{MUNICIPIO} — Emendas MDS")
     st.markdown("---")
     df = DADOS.get("mds", pd.DataFrame())
-    if not df.empty and "Valor" in df.columns:
-        df = df[df["Valor"].apply(_m) > 0].reset_index(drop=True)
+    _cv = _primeira_col(df, COLS_REP_PACT) if not df.empty else None
+    if _cv:
+        df = df[df[_cv].apply(_m) > 0].reset_index(drop=True)
     if df.empty:
         st.info("Não há emendas MDS lançadas para este município.")
     else:
-        tot = df["Valor"].apply(_m).sum()
+        tot = _col_soma(df, COLS_REP_PACT)
         kpi_row([("Nº de Emendas MDS", str(len(df))), ("Valor Total", formar_real(tot))])
         st.markdown("---")
-        barras_por(df, "Ano", "Valor", "Ano", cor=C_SALDO, horizontal=False)
+        barras_por(df, "Ano", _primeira_col(df, COLS_REP_PACT), "Ano", cor=C_SALDO, horizontal=False)
         st.markdown("---")
         tabela_detalhe(df, ["Emendas MDS", "Ano", "Instituição Beneficiária",
-                            "Valor", "Status Plano de Trabalho"])
+                            "Repasse Pactuado", "Valor", "Status Plano de Trabalho"])
 
 
 # ── FIM DO SCRIPT: libera o loader (a página terminou de renderizar) ──────────
