@@ -110,7 +110,6 @@ ABAS = {
     "emen_fed":  "Emendas Especiais Federais",
     "emen_est":  "Emendas Especiais Estaduais",
     "mds":       "MDS",
-    "relatorio": "Relatório",
 }
 
 # Cores institucionais
@@ -293,6 +292,42 @@ def _linhas_validas(df):
         return df
     m = df["Município"].astype(str).str.strip().str.lower()
     return df[m == MUNICIPIO.strip().lower()].reset_index(drop=True)
+
+
+# Abas que compõem a base de dados: as individualizadas (SEM Relatório e SEM
+# inativos, que nem são carregadas). Repasse/valores vêm dessas abas.
+ABAS_DADOS = ["conv_fed", "conv_est", "emen_fed", "emen_est", "mds"]
+
+# Colunas PADRONIZADAS. As abas estaduais já usam esses nomes; as federais/MDS
+# ainda usam os antigos → fallback garante que nada quebre na transição.
+COLS_REP_PACT = ["Repasse Pactuado", "Valor Repasse", "Valor"]
+COLS_REP_REC  = ["Repasse Recebido"]
+COLS_REP_AREC = ["Repasse à Receber", "Repasse á Receber"]
+COLS_CON_LIC  = ["Contrapartida Licitada"]
+COLS_CON_DEP  = ["Contrapartida Depositada"]
+COLS_CON_ADEP = ["Contrapartida à Depositar", "Contrapartida á Depositar"]
+COLS_CONTRAP  = ["Contrapartida Pactuada", "Contrapartida"]
+
+
+def _col_series(df, nomes):
+    """Série numérica da 1ª coluna existente da lista (zeros se nenhuma existir)."""
+    for n in nomes:
+        if n in df.columns:
+            return df[n].apply(_m)
+    return pd.Series([0.0] * len(df), index=df.index)
+
+
+def _col_soma(df, nomes):
+    if df is None or df.empty:
+        return 0.0
+    return _col_series(df, nomes).sum()
+
+
+def _primeira_col(df, nomes):
+    for n in nomes:
+        if n in df.columns:
+            return n
+    return None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -536,93 +571,45 @@ if setor == "Visão Macro":
     titulo_pagina(f"{MUNICIPIO} — Convênios &amp; Emendas · Visão Macro")
     st.markdown("---")
 
-    rel = DADOS.get("relatorio", pd.DataFrame())
-    if not rel.empty and "FONTE" in rel.columns:
-        rel = rel[rel["FONTE"].astype(str).str.strip().isin(
-            ["FEDERAL", "E. FEDERAL", "ESTADUAL", "E. ESTADUAL"])].copy()
+    st.subheader("Resumo Captação Total")
+    st.caption("Valores somados diretamente das abas individualizadas "
+               "(Convênios e Emendas Federais/Estaduais + MDS), desconsiderando "
+               "as abas de inativos.")
 
-    def _s(col):
-        return rel[col].apply(_m).sum() if (not rel.empty and col in rel.columns) else 0.0
+    def _soma_metrica(nomes):
+        return sum(_col_soma(_linhas_validas(DADOS.get(k, pd.DataFrame())), nomes)
+                   for k in ABAS_DADOS)
 
-    tot_rep = _s("R$ REPASSE"); tot_rec = _s("R$ RECEBIDO")
-    tot_con = _s("R$ CONTRAPARTIDA"); tot_dep = _s("DEPOSITADO"); tot_sal = _s("SALDO")
+    rep_pact = _soma_metrica(COLS_REP_PACT)
+    rep_rec  = _soma_metrica(COLS_REP_REC)
+    rep_arec = _soma_metrica(COLS_REP_AREC)
+    con_lic  = _soma_metrica(COLS_CON_LIC)
+    con_dep  = _soma_metrica(COLS_CON_DEP)
+    con_adep = _soma_metrica(COLS_CON_ADEP)
 
-    if not rel.empty:
-        # Planilha COM aba Relatório (consolidado oficial)
-        st.subheader("Consolidado (aba Relatório)")
-        kpi_row([("Repasse Total", formar_real(tot_rep)),
-                 ("Recebido", formar_real(tot_rec)),
-                 ("Contrapartida", formar_real(tot_con)),
-                 ("Depositado", formar_real(tot_dep)),
-                 ("Saldo", formar_real(tot_sal))])
+    kpi_row([("Repasse Pactuado", formar_real(rep_pact)),
+             ("Repasse Recebido", formar_real(rep_rec)),
+             ("Repasse à Receber", formar_real(rep_arec))])
+    kpi_row([("Contrapartida Licitada", formar_real(con_lic)),
+             ("Contrapartida Depositada", formar_real(con_dep)),
+             ("Contrapartida à Depositar", formar_real(con_adep))])
 
-        taxa_exec = (tot_rec / tot_rep * 100) if tot_rep > 0 else 0.0
-        st.metric("Taxa de Execução (Recebido / Repasse)",
-                  f"{taxa_exec:.1f}%".replace(".", ","),
-                  help="Percentual do repasse que já foi efetivamente recebido.")
-    else:
-        # Planilha SEM aba Relatório → consolida direto das abas de origem
-        st.subheader("Consolidado")
-        st.caption("Esta planilha não possui a aba **Relatório**; os totais abaixo são "
-                   "calculados diretamente das abas de Convênios e Emendas.")
+    taxa_exec = (rep_rec / rep_pact * 100) if rep_pact > 0 else 0.0
+    st.metric("Taxa de Execução (Recebido / Pactuado)",
+              f"{taxa_exec:.1f}%".replace(".", ","),
+              help="Percentual do repasse pactuado que já foi efetivamente recebido.")
 
-        def _soma_aba(chave, coluna):
-            d = _linhas_validas(DADOS.get(chave, pd.DataFrame()))
-            return d[coluna].apply(_m).sum() if (not d.empty and coluna in d.columns) else 0.0
-
-        def _soma_saldo(chave):
-            d = _linhas_validas(DADOS.get(chave, pd.DataFrame()))
-            if d.empty:
-                return 0.0
-            c = next((c for c in d.columns if "saldo" in c.lower()), None)
-            return d[c].apply(_m).sum() if c else 0.0
-
-        rep_conv = _soma_aba("conv_fed", "Valor Repasse") + _soma_aba("conv_est", "Valor Repasse")
-        con_conv = _soma_aba("conv_fed", "Contrapartida") + _soma_aba("conv_est", "Contrapartida")
-        val_emen = (_soma_aba("emen_fed", "Valor") + _soma_aba("emen_est", "Valor")
-                    + _soma_aba("mds", "Valor"))
-        sal_tot  = sum(_soma_saldo(k) for k in ("conv_fed", "conv_est", "emen_fed", "emen_est"))
-
-        kpi_row([("Repasse — Convênios", formar_real(rep_conv)),
-                 ("Contrapartida", formar_real(con_conv)),
-                 ("Emendas (Fed. + Est. + MDS)", formar_real(val_emen)),
-                 ("Saldo em Conta", formar_real(sal_tot)),
-                 ("Captação Total", formar_real(rep_conv + val_emen))])
-
-    if not rel.empty and "FONTE" in rel.columns:
-        st.markdown("---")
-        st.subheader("Repasse × Recebido × Saldo por Fonte")
-        g = rel.copy()
-        for c in ["R$ REPASSE", "R$ RECEBIDO", "SALDO"]:
-            if c in g.columns:
-                g[c] = g[c].apply(_m)
-        gg = g.groupby(g["FONTE"].astype(str).str.strip())[
-            [c for c in ["R$ REPASSE", "R$ RECEBIDO", "SALDO"] if c in g.columns]].sum().reset_index()
-        fig = go.Figure()
-        cores = {"R$ REPASSE": C_REP, "R$ RECEBIDO": C_EST, "SALDO": C_SALDO}
-        for c in [c for c in ["R$ REPASSE", "R$ RECEBIDO", "SALDO"] if c in gg.columns]:
-            fig.add_bar(x=gg["FONTE"], y=gg[c], name=c.replace("R$ ", "").title(),
-                        marker_color=cores[c],
-                        hovertemplate="<b>%{x}</b><br>R$ %{y:,.2f}<extra></extra>")
-        fig.update_layout(barmode="group", height=430, separators=",.",
-                          yaxis_tickprefix="R$ ", legend=dict(orientation="h", y=-0.2),
-                          margin=dict(t=20, b=40))
-        st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
-
-    # Panorama por fonte de captação (soma bruta de cada aba)
+    # ── Captação por Origem (mantida) ──
     st.markdown("---")
     st.subheader("Captação por Origem")
     origens = []
-    for chave, rotulo, valcol, cor in [
-        ("conv_fed", "Convênios Federais", "Valor Repasse", C_FED),
-        ("conv_est", "Convênios Estaduais", "Valor Repasse", C_FED),
-        ("emen_fed", "Emendas Especiais Federais", "Valor", C_EST),
-        ("emen_est", "Emendas Especiais Estaduais", "Valor", C_EST),
-        ("mds", "MDS", "Valor", C_SALDO),
-    ]:
+    for chave, rotulo in [("conv_fed", "Convênios Federais"),
+                          ("conv_est", "Convênios Estaduais"),
+                          ("emen_fed", "Emendas Especiais Federais"),
+                          ("emen_est", "Emendas Especiais Estaduais"),
+                          ("mds", "MDS")]:
         d = _linhas_validas(DADOS.get(chave, pd.DataFrame()))
-        v = d[valcol].apply(_m).sum() if (not d.empty and valcol in d.columns) else 0.0
-        origens.append({"Origem": rotulo, "Valor": v})
+        origens.append({"Origem": rotulo, "Valor": _col_soma(d, COLS_REP_PACT)})
     do = pd.DataFrame(origens)
     do = do[do["Valor"] > 0]
     if not do.empty:
@@ -636,7 +623,7 @@ if setor == "Visão Macro":
             fig.update_traces(hovertemplate="<b>%{y}</b><br>R$ %{x:,.2f}<extra></extra>")
             st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
         with c2:
-            st.metric("Captação Total (bruta)", formar_real(do["Valor"].sum()))
+            st.metric("Captação Total (Repasse Pactuado)", formar_real(do["Valor"].sum()))
             for _, r in do.iterrows():
                 st.caption(f"**{r['Origem']}**: {formar_real(r['Valor'])}")
 
@@ -647,111 +634,65 @@ if setor == "Visão Macro":
 if setor == "Convênio a Convênio":
     titulo_pagina(f"{MUNICIPIO} — Convênio a Convênio")
     st.markdown("---")
-    rel = DADOS.get("relatorio", pd.DataFrame())
-    if not rel.empty and "FONTE" in rel.columns:
-        rel = rel[rel["FONTE"].astype(str).str.strip().isin(
-            ["FEDERAL", "E. FEDERAL", "ESTADUAL", "E. ESTADUAL"])].copy()
-    if rel.empty:
-        # Sem aba Relatório → monta o convênio a convênio a partir das abas
-        # de Convênios Federais e Estaduais (sem taxa: não há "Recebido").
-        partes = []
-        for chave, origem in [("conv_fed", "Federal"), ("conv_est", "Estadual")]:
-            d = _linhas_validas(DADOS.get(chave, pd.DataFrame()))
-            if d.empty:
-                continue
-            col_saldo = next((c for c in d.columns if "saldo" in c.lower()), None)
-            p = pd.DataFrame({
-                "Origem": origem,
-                "Nº do Convênio": d.get("Nº do Convênio", pd.Series([""] * len(d))).astype(str),
-                "Objeto": d.get("Objeto", pd.Series([""] * len(d))).astype(str),
-                "Ano": d.get("Ano", pd.Series([""] * len(d))).astype(str),
-                "_rep": d["Valor Repasse"].apply(_m) if "Valor Repasse" in d.columns else 0.0,
-                "_con": d["Contrapartida"].apply(_m) if "Contrapartida" in d.columns else 0.0,
-                "_sal": d[col_saldo].apply(_m) if col_saldo else 0.0,
-            })
-            partes.append(p)
-        cc = pd.concat(partes, ignore_index=True) if partes else pd.DataFrame()
 
-        if cc.empty:
-            st.info("Sem convênios lançados para este município.")
-        else:
-            st.caption("Esta planilha não possui a aba **Relatório**; o detalhamento abaixo "
-                       "vem das abas de Convênios. A *taxa de execução* depende da coluna "
-                       "**Recebido** (exclusiva da aba Relatório) e por isso não é exibida aqui.")
-            kpi_row([("Nº de Convênios", str(len(cc))),
-                     ("Repasse Total", formar_real(cc["_rep"].sum())),
-                     ("Contrapartida", formar_real(cc["_con"].sum())),
-                     ("Saldo em Conta", formar_real(cc["_sal"].sum()))])
+    # Base: abas de Convênios Federais + Estaduais (mesmas colunas da Visão Macro)
+    partes = []
+    for chave, origem in [("conv_fed", "Federal"), ("conv_est", "Estadual")]:
+        d = _linhas_validas(DADOS.get(chave, pd.DataFrame()))
+        if d.empty:
+            continue
+        partes.append(pd.DataFrame({
+            "Origem": origem,
+            "Nº do Convênio": d.get("Nº do Convênio", pd.Series([""] * len(d))).astype(str).values,
+            "Objeto": d.get("Objeto", pd.Series([""] * len(d))).astype(str).values,
+            "Ano": d.get("Ano", pd.Series([""] * len(d))).astype(str).values,
+            "_rep": _col_series(d, COLS_REP_PACT).values,
+            "_rec": _col_series(d, COLS_REP_REC).values,
+        }))
+    cc = pd.concat(partes, ignore_index=True) if partes else pd.DataFrame()
 
-            st.markdown("---")
-            st.subheader("Repasse por Convênio")
-            # nome COMPLETO no hover; no eixo, abreviação com reticências
-            cc["_full"] = (cc["Nº do Convênio"].str.strip() + " · " +
-                           cc["Objeto"].str.strip()).str.strip(" ·")
-            cc["_lbl"] = _rotulos_unicos([_abrev(x) for x in cc["_full"]])
-            gg = cc[cc["_rep"] > 0].sort_values("_rep", ascending=True)
-            if not gg.empty:
-                fig = px.bar(gg, x="_rep", y="_lbl", orientation="h", color="Origem",
-                             color_discrete_map={"Federal": C_FED, "Estadual": C_EST},
-                             custom_data=["_full"])
-                fig.update_layout(height=max(360, 34 * len(gg)), separators=",.",
-                                  xaxis_tickprefix="R$ ", xaxis_title="", yaxis_title="",
-                                  yaxis=dict(automargin=True),
-                                  legend=dict(orientation="h", y=-0.12),
-                                  margin=dict(t=20, b=40))
-                fig.update_traces(hovertemplate=("<b>%{customdata[0]}</b><br>"
-                                                 "Repasse: R$ %{x:,.2f}<extra></extra>"))
-                st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
-
-            st.markdown("---")
-            st.markdown("##### 📋 Detalhamento por Convênio")
-            det = cc.copy()
-            det["Valor Repasse"] = det["_rep"].apply(formar_real)
-            det["Contrapartida"] = det["_con"].apply(formar_real)
-            det["Saldo em Conta"] = det["_sal"].apply(formar_real)
-            st.dataframe(det[["Origem", "Nº do Convênio", "Ano", "Objeto",
-                              "Valor Repasse", "Contrapartida", "Saldo em Conta"]],
-                         use_container_width=True, hide_index=True)
+    if cc.empty:
+        st.info("Sem convênios lançados para este município.")
     else:
-        rel["_rep"] = rel["R$ REPASSE"].apply(_m) if "R$ REPASSE" in rel.columns else 0.0
-        rel["_rec"] = rel["R$ RECEBIDO"].apply(_m) if "R$ RECEBIDO" in rel.columns else 0.0
-        rel["_sal"] = rel["SALDO"].apply(_m) if "SALDO" in rel.columns else 0.0
-        rel["_taxa"] = rel.apply(lambda r: (r["_rec"] / r["_rep"] * 100) if r["_rep"] > 0 else 0.0, axis=1)
+        cc["_pct"] = cc.apply(lambda r: (r["_rec"] / r["_rep"] * 100)
+                              if r["_rep"] > 0 else 0.0, axis=1)
+        tot_rep = cc["_rep"].sum()
+        tot_rec = cc["_rec"].sum()
+        taxa_receb = (tot_rec / tot_rep * 100) if tot_rep > 0 else 0.0
 
-        taxa_media = (rel["_rec"].sum() / rel["_rep"].sum() * 100) if rel["_rep"].sum() > 0 else 0.0
-        kpi_row([("Nº de Convênios", str(len(rel))),
-                 ("Repasse Total", formar_real(rel["_rep"].sum())),
-                 ("Recebido", formar_real(rel["_rec"].sum())),
-                 ("Taxa de Execução Média", f"{taxa_media:.1f}%".replace(".", ","))])
+        kpi_row([("Nº de Convênios", str(len(cc))),
+                 ("Repasse Total", formar_real(tot_rep)),
+                 ("Recebido", formar_real(tot_rec)),
+                 ("Taxa de Recebimento", f"{taxa_receb:.1f}%".replace(".", ","))])
 
         st.markdown("---")
-        st.subheader("Taxa de Execução por Convênio (Recebido / Repasse)")
-        rr = rel.sort_values("_taxa", ascending=True).copy()
-        rotulo = ("Nº CONVÊNIO" if "Nº CONVÊNIO" in rr.columns else None)
-        _obj = rr.get("OBJETO", pd.Series([""] * len(rr))).astype(str).str.strip()
-        rr["_full"] = ((rr[rotulo].astype(str).str.strip() + " · " + _obj).str.strip(" ·")
-                       if rotulo else _obj)
-        rr["_lbl"] = _rotulos_unicos([_abrev(x) for x in rr["_full"]])
-        fig = px.bar(rr, x="_taxa", y="_lbl", orientation="h",
-                     color="_taxa", color_continuous_scale=["#860000", "#f39c12", "#2ea043"],
+        st.subheader("Percentual de Repasse recebido")
+        cc["_full"] = (cc["Nº do Convênio"].str.strip() + " · " +
+                       cc["Objeto"].str.strip()).str.strip(" ·")
+        cc["_lbl"] = _rotulos_unicos([_abrev(x) for x in cc["_full"]])
+        rr = cc.sort_values("_pct", ascending=True)
+        fig = px.bar(rr, x="_pct", y="_lbl", orientation="h",
+                     color="_pct", color_continuous_scale=["#860000", "#f39c12", "#2ea043"],
                      range_color=[0, 100], custom_data=["_full", "_rep", "_rec"])
         fig.update_layout(height=max(360, 34 * len(rr)), separators=",.",
-                          xaxis_title="Taxa de Execução (%)", yaxis_title="",
+                          xaxis_title="Repasse recebido (%)", yaxis_title="",
                           yaxis=dict(automargin=True),
                           coloraxis_showscale=False, margin=dict(t=20, b=30))
         fig.update_traces(hovertemplate=("<b>%{customdata[0]}</b><br>"
-                                         "Execução: %{x:.1f}%<br>"
+                                         "Repasse recebido: %{x:.1f}%<br>"
                                          "Repasse: R$ %{customdata[1]:,.2f}<br>"
                                          "Recebido: R$ %{customdata[2]:,.2f}<extra></extra>"))
         st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
 
         st.markdown("---")
         st.markdown("##### 📋 Detalhamento por Convênio")
-        det = rel.copy()
-        det["Taxa Execução"] = det["_taxa"].apply(lambda x: f"{x:.1f}%".replace(".", ","))
-        cols_show = [c for c in ["FONTE", "Nº CONVÊNIO", "OBJETO", "R$ REPASSE",
-                                 "R$ RECEBIDO", "SALDO", "Taxa Execução"] if c in det.columns]
-        st.dataframe(det[cols_show], use_container_width=True, hide_index=True)
+        det = cc.copy()
+        det["Repasse Pactuado"] = det["_rep"].apply(formar_real)
+        det["Repasse Recebido"] = det["_rec"].apply(formar_real)
+        det["% Recebido"] = det["_pct"].apply(lambda x: f"{x:.1f}%".replace(".", ","))
+        st.dataframe(det[["Origem", "Nº do Convênio", "Ano", "Objeto",
+                          "Repasse Pactuado", "Repasse Recebido", "% Recebido"]],
+                     use_container_width=True, hide_index=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -764,8 +705,8 @@ def render_convenios(chave, titulo, dim_orgao, cor):
     if df.empty:
         st.info("Sem dados nesta aba.")
         return
-    tot_rep = df["Valor Repasse"].apply(_m).sum() if "Valor Repasse" in df.columns else 0.0
-    tot_con = df["Contrapartida"].apply(_m).sum() if "Contrapartida" in df.columns else 0.0
+    tot_rep = _col_soma(df, COLS_REP_PACT)
+    tot_con = _col_soma(df, COLS_CONTRAP)
     col_saldo = next((c for c in df.columns if "saldo" in c.lower()), None)
     tot_sal = df[col_saldo].apply(_m).sum() if col_saldo else 0.0
     kpi_row([("Nº de Convênios", str(len(df))),
@@ -773,15 +714,16 @@ def render_convenios(chave, titulo, dim_orgao, cor):
              ("Contrapartida", formar_real(tot_con)),
              ("Saldo em Conta", formar_real(tot_sal))])
 
+    _crep = _primeira_col(df, COLS_REP_PACT)
     st.markdown("---")
     st.subheader(f"Repasse por {dim_orgao}")
-    barras_por(df, dim_orgao, "Valor Repasse", dim_orgao, cor=cor)
+    barras_por(df, dim_orgao, _crep, dim_orgao, cor=cor)
 
     st.markdown("---")
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("Repasse por Ano")
-        barras_por(df, "Ano", "Valor Repasse", "Ano", cor=cor, horizontal=False)
+        barras_por(df, "Ano", _crep, "Ano", cor=cor, horizontal=False)
     with c2:
         st.subheader("Situação (Status)")
         scol = "Status PB /TR" if "Status PB /TR" in df.columns else None
@@ -800,7 +742,8 @@ def render_convenios(chave, titulo, dim_orgao, cor):
 
     st.markdown("---")
     tabela_detalhe(df, [dim_orgao, "Nº do Convênio", "Ano", "Objeto",
-                        "Valor Repasse", "Contrapartida", "GND",
+                        "Repasse Pactuado", "Valor Repasse", "Repasse Recebido",
+                        "Contrapartida Pactuada", "Contrapartida", "GND",
                         "Status PB /TR", "Status Execução"])
 
 
