@@ -319,7 +319,7 @@ def _detectar_meses(df_f, df_dfonte):
             v_d = df_dfonte[df_dfonte['Tipo'] == 'Liquidado'][m].sum()
         if abs(v_f) > 0.005 or abs(v_d) > 0.005:
             out.append(m)
-    return out or ['Janeiro','Fevereiro','Março','Abril', 'Maio']
+    return out or ['Janeiro','Fevereiro','Março','Abril','Maio']
 
 
 # ══════════════════════════════════════════════════════════════════════════════
