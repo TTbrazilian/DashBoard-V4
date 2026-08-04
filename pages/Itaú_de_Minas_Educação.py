@@ -3,6 +3,10 @@
 #  Este comentário silencia apenas o aviso de tipagem do Pylance, sem afetar a execução.)
 import streamlit as st
 import pandas as pd
+import io
+import csv
+import gspread
+from google.oauth2.service_account import Credentials
 import plotly.express as px
 import plotly.io as pio
 import os
@@ -485,14 +489,47 @@ def _pdf_relatorio(d, municipio, secretaria=None):
 # • VAAR e VAAT separados; só VAAT entra na base ETI
 # • Base 70% = Principal + Rendimentos
 # • Novos elementos folha: 'Diárias - Pessoal Civil', 'Contribuições'
+# ── LEITURA VIA GOOGLE SHEETS (com fallback CSV local durante a migração) ─────
+@st.cache_resource
+def _conectar_sheets():
+    escopos = ["https://www.googleapis.com/auth/spreadsheets.readonly",
+               "https://www.googleapis.com/auth/drive.readonly"]
+    cred = Credentials.from_service_account_info(
+        dict(st.secrets["gcp_service_account"]), scopes=escopos)
+    return gspread.authorize(cred)
+
+
+def _ler_aba(sheet_id, aba, **read_csv_kwargs):
+    """Lê uma aba do Google Sheets com a MESMA semântica do pd.read_csv de arquivo:
+    reconstrói um CSV em memória a partir das células e reutiliza o pd.read_csv,
+    preservando header=[0,1] etc. (byte-fiel ao arquivo original)."""
+    ws = _conectar_sheets().open_by_key(sheet_id).worksheet(aba)
+    buf = io.StringIO()
+    csv.writer(buf).writerows(ws.get_all_values())
+    buf.seek(0)
+    return pd.read_csv(buf, **read_csv_kwargs)
+
+
+def _fonte(sid, aba, path_local, **kwargs):
+    """Fonte de dados: Google Sheets (se sid configurado) → CSV local (fallback)."""
+    if sid:
+        try:
+            kw = {k: v for k, v in kwargs.items() if k != "encoding"}
+            return _ler_aba(sid, aba, **kw)
+        except Exception:
+            pass
+    return pd.read_csv(path_local, **kwargs)
+
+
 @st.cache_data
 def load_all_data():
     path_f  = buscar_arquivo("zEducação/Itaú de Minas.csv")
     path_r  = buscar_arquivo("zEducação/Itaú de Minas_R.csv")
     path_df = buscar_arquivo("zEducação/Itaú de Minas_DF.csv")
-    if not path_f or not path_r or not path_df: return None, None, None
+    sid = st.secrets.get("educacao", {}).get("Itaú de Minas", "")
+    if not sid and (not path_f or not path_r or not path_df): return None, None, None
 
-    df_f = pd.read_csv(path_f, sep=None, engine='python', encoding='utf-8', header=[0,1])
+    df_f = _fonte(sid, "Itaú de Minas", path_f, sep=None, engine='python', encoding='utf-8', header=[0,1])
     new_cols = []
     for col in df_f.columns:
         new_cols.append(col[1].strip() if "Unnamed" in col[0]
@@ -503,13 +540,13 @@ def load_all_data():
                                    'Creditado','Anulado']):
             df_f[col] = df_f[col].apply(limpar_valor)
 
-    df_r = pd.read_csv(path_r, sep=None, engine='python', encoding='utf-8', header=0)
+    df_r = _fonte(sid, "Itaú de Minas_R", path_r, sep=None, engine='python', encoding='utf-8', header=0)
     df_r.columns = [str(c).strip() for c in df_r.columns]
     COLS_R = ORDEM_MESES + ['Total','Orçado Receitas','Repasse','2025']
     for col in df_r.columns:
         if col in COLS_R: df_r[col] = df_r[col].apply(limpar_valor)
 
-    df_df = pd.read_csv(path_df, sep=None, engine='python', encoding='utf-8')
+    df_df = _fonte(sid, "Itaú de Minas_DF", path_df, sep=None, engine='python', encoding='utf-8')
     df_df.columns = [str(c).strip() for c in df_df.columns]
     df_df = df_df[df_df['Tipo'].isin(['Empenhado','Liquidado','Pago'])].copy()
     df_df['Tipo'] = df_df['Tipo'].str.strip()
@@ -526,7 +563,7 @@ def load_all_data():
 df_f_raw, df_r, df_df_raw = load_all_data()
 
 # ATUALIZADO: 4 meses
-meses_disponiveis = ['Janeiro','Fevereiro','Março','Abril', 'Maio']
+meses_disponiveis = ['Janeiro','Fevereiro','Março','Abril']
 
 if df_f_raw is not None and df_r is not None:
 

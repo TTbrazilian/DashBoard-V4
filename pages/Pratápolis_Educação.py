@@ -1,5 +1,9 @@
 import streamlit as st
 import pandas as pd
+import io
+import csv
+import gspread
+from google.oauth2.service_account import Credentials
 import plotly.express as px
 import plotly.io as pio
 import os
@@ -137,15 +141,48 @@ def soma(df, cols):
 #   os primeiros registros sem label → preenchidos como 'Empenhado'. Fonte = 'nº'.
 # • FUNDEB 70% Liq = R$ 794.159,07 | FUNDEB 30% Liq = R$ 0,00
 # • RP 15001 Liq = R$ 500.442,13 | Capital = R$ 23.144,26 | Custeio = R$ 1.468.107,64
+# ── LEITURA VIA GOOGLE SHEETS (com fallback CSV local durante a migração) ─────
+@st.cache_resource
+def _conectar_sheets():
+    escopos = ["https://www.googleapis.com/auth/spreadsheets.readonly",
+               "https://www.googleapis.com/auth/drive.readonly"]
+    cred = Credentials.from_service_account_info(
+        dict(st.secrets["gcp_service_account"]), scopes=escopos)
+    return gspread.authorize(cred)
+
+
+def _ler_aba(sheet_id, aba, **read_csv_kwargs):
+    """Lê uma aba do Google Sheets com a MESMA semântica do pd.read_csv de arquivo:
+    reconstrói um CSV em memória a partir das células e reutiliza o pd.read_csv,
+    preservando header=[0,1] etc. (byte-fiel ao arquivo original)."""
+    ws = _conectar_sheets().open_by_key(sheet_id).worksheet(aba)
+    buf = io.StringIO()
+    csv.writer(buf).writerows(ws.get_all_values())
+    buf.seek(0)
+    return pd.read_csv(buf, **read_csv_kwargs)
+
+
+def _fonte(sid, aba, path_local, **kwargs):
+    """Fonte de dados: Google Sheets (se sid configurado) → CSV local (fallback)."""
+    if sid:
+        try:
+            kw = {k: v for k, v in kwargs.items() if k != "encoding"}
+            return _ler_aba(sid, aba, **kw)
+        except Exception:
+            pass
+    return pd.read_csv(path_local, **kwargs)
+
+
 @st.cache_data
 def load_all_data():
     path_f  = buscar_arquivo("zEducação/Pratápolis.csv")
     path_r  = buscar_arquivo("zEducação/Pratápolis_R.csv")
     path_df = buscar_arquivo("zEducação/Pratápolis_DF.csv")
-    if not path_f or not path_r or not path_df: return None, None, None
+    sid = st.secrets.get("educacao", {}).get("Pratápolis", "")
+    if not sid and (not path_f or not path_r or not path_df): return None, None, None
 
     # ── FICHAS — cabeçalho duplo padrão ──────────────────────────────────────
-    df_f = pd.read_csv(path_f, sep=None, engine='python', encoding='utf-8', header=[0,1])
+    df_f = _fonte(sid, "Pratápolis", path_f, sep=None, engine='python', encoding='utf-8', header=[0,1])
     new_cols = []
     for col in df_f.columns:
         new_cols.append(col[1].strip() if "Unnamed" in col[0]
@@ -160,7 +197,7 @@ def load_all_data():
     # ── RECEITAS — header real está na linha 0 dos dados ─────────────────────
     # IMPORTANTE: 'Atualização Quadrimestral' NÃO está em COLS_R para evitar
     # double-parse (o bloco FUNDEB aplicará limpar_valor uma única vez na string bruta).
-    df_r_raw = pd.read_csv(path_r, sep=None, engine='python', encoding='utf-8', header=0)
+    df_r_raw = _fonte(sid, "Pratápolis_R", path_r, sep=None, engine='python', encoding='utf-8', header=0)
     df_r = df_r_raw.copy()
     df_r.columns = df_r.iloc[0].fillna('').str.strip()
     df_r = df_r.iloc[1:].reset_index(drop=True)
@@ -175,7 +212,7 @@ def load_all_data():
             df_r[col] = df_r[col].apply(limpar_valor)
 
     # ── DESPESAS POR FONTE — estágio inferido da coluna 'Empenhado' ───────────
-    df_df = pd.read_csv(path_df, sep=None, engine='python', encoding='utf-8')
+    df_df = _fonte(sid, "Pratápolis_DF", path_df, sep=None, engine='python', encoding='utf-8')
     df_df.columns = [str(c).strip() for c in df_df.columns]
     df_df = df_df.rename(columns={'Empenhado': 'Tipo', 'nº': 'Fonte'})
     df_df['Tipo'] = df_df['Tipo'].where(

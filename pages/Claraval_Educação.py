@@ -1,5 +1,9 @@
 import streamlit as st
 import pandas as pd
+import io
+import csv
+import gspread
+from google.oauth2.service_account import Credentials
 import plotly.express as px
 import plotly.io as pio
 import os
@@ -136,14 +140,47 @@ def soma(df, cols):
 # • QESE fontes: ['1550','2550']
 # • Descontos 25%: FUNDEB 10% = R$78.825,97 | Superávit = R$91.314,62
 # • VAAT = R$0 no período → base 70% = Principal + Rendimentos
+# ── LEITURA VIA GOOGLE SHEETS (com fallback CSV local durante a migração) ─────
+@st.cache_resource
+def _conectar_sheets():
+    escopos = ["https://www.googleapis.com/auth/spreadsheets.readonly",
+               "https://www.googleapis.com/auth/drive.readonly"]
+    cred = Credentials.from_service_account_info(
+        dict(st.secrets["gcp_service_account"]), scopes=escopos)
+    return gspread.authorize(cred)
+
+
+def _ler_aba(sheet_id, aba, **read_csv_kwargs):
+    """Lê uma aba do Google Sheets com a MESMA semântica do pd.read_csv de arquivo:
+    reconstrói um CSV em memória a partir das células e reutiliza o pd.read_csv,
+    preservando header=[0,1] etc. (byte-fiel ao arquivo original)."""
+    ws = _conectar_sheets().open_by_key(sheet_id).worksheet(aba)
+    buf = io.StringIO()
+    csv.writer(buf).writerows(ws.get_all_values())
+    buf.seek(0)
+    return pd.read_csv(buf, **read_csv_kwargs)
+
+
+def _fonte(sid, aba, path_local, **kwargs):
+    """Fonte de dados: Google Sheets (se sid configurado) → CSV local (fallback)."""
+    if sid:
+        try:
+            kw = {k: v for k, v in kwargs.items() if k != "encoding"}
+            return _ler_aba(sid, aba, **kw)
+        except Exception:
+            pass
+    return pd.read_csv(path_local, **kwargs)
+
+
 @st.cache_data
 def load_all_data():
     path_f  = buscar_arquivo("zEducação/Claraval.csv")
     path_r  = buscar_arquivo("zEducação/Claraval_R.csv")
     path_df = buscar_arquivo("zEducação/Claraval_DF.csv")
-    if not path_f or not path_r or not path_df: return None, None, None
+    sid = st.secrets.get("educacao", {}).get("Claraval", "")
+    if not sid and (not path_f or not path_r or not path_df): return None, None, None
 
-    df_f = pd.read_csv(path_f, sep=None, engine='python', encoding='utf-8', header=[0,1])
+    df_f = _fonte(sid, "Claraval", path_f, sep=None, engine='python', encoding='utf-8', header=[0,1])
     new_cols = []
     for col in df_f.columns:
         new_cols.append(col[1].strip() if "Unnamed" in col[0]
@@ -154,7 +191,7 @@ def load_all_data():
                                    'Creditado','Anulado']):
             df_f[col] = df_f[col].apply(limpar_valor)
 
-    df_r = pd.read_csv(path_r, sep=None, engine='python', encoding='utf-8', header=0)
+    df_r = _fonte(sid, "Claraval_R", path_r, sep=None, engine='python', encoding='utf-8', header=0)
     df_r.columns = [str(c).strip() for c in df_r.columns]
     # Repasse e 2025 incluídos → numéricos (evita erro nos Vinculados)
     # Atualização Quadrimestral fora → limpeza 1x no bloco FUNDEB
@@ -163,7 +200,7 @@ def load_all_data():
         if col in COLS_R:
             df_r[col] = df_r[col].apply(limpar_valor)
 
-    df_df = pd.read_csv(path_df, sep=None, engine='python', encoding='utf-8')
+    df_df = _fonte(sid, "Claraval_DF", path_df, sep=None, engine='python', encoding='utf-8')
     df_df.columns = [str(c).strip() for c in df_df.columns]
     df_df = df_df[df_df['Tipo'].isin(['Empenhado','Liquidado','Pago'])].copy()
     for col in df_df.columns:
