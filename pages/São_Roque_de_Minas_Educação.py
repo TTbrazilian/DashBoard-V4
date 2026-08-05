@@ -190,6 +190,27 @@ def _canon_mes(nome):
             return _mes
     return None
 
+_TIPOS_FICHA = ('Empenhado', 'Liquidado', 'Pago')
+
+def _monta_col_ficha(col):
+    """Monta o nome da coluna de FICHAS (cabeçalho duplo) tolerando a ORDEM dos
+    níveis: aceita Tipo-em-cima/Mês-embaixo OU o inverso, e normaliza o mês.
+    Garante o padrão '<Mês>_<Tipo>' esperado (ex.: 'Maio_Liquidado'), evitando
+    zeros quando a planilha inverte as linhas do cabeçalho."""
+    a = str(col[0]).strip()
+    b = str(col[1]).strip()
+    if 'Unnamed' in str(col[0]) or a == '':
+        return b
+    if 'Unnamed' in str(col[1]) or b == '':
+        return a
+    if a in _TIPOS_FICHA:
+        tipo, mes = a, b
+    elif b in _TIPOS_FICHA:
+        tipo, mes = b, a
+    else:
+        return f"{b}_{a}"
+    return f"{(_canon_mes(mes) or mes)}_{tipo}"
+
 def _canoniza_meses_flat(df):
     if df is None:
         return df
@@ -210,14 +231,7 @@ def load_all_data():
     if not sid and (not path_f or not path_r or not path_df): return None, None, None
 
     df_f = _fonte(sid, "Fichas", path_f, sep=None, engine='python', encoding='utf-8', header=[0,1])
-    new_cols = []
-    for col in df_f.columns:
-        if "Unnamed" in col[0]:
-            new_cols.append(col[1].strip())
-        else:
-            _mes_c = _canon_mes(col[1].strip()) or col[1].strip()
-            new_cols.append(f"{_mes_c}_{col[0].strip()}")
-    df_f.columns = new_cols
+    df_f.columns = [_monta_col_ficha(col) for col in df_f.columns]
     for col in df_f.columns:
         if any(k in col for k in ['Orçado','Saldo','Liquidado','Empenhado','Pago',
                                    'Creditado','Anulado']):
