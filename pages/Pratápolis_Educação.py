@@ -182,7 +182,7 @@ def load_all_data():
     if not sid and (not path_f or not path_r or not path_df): return None, None, None
 
     # ── FICHAS — cabeçalho duplo padrão ──────────────────────────────────────
-    df_f = _fonte(sid, "Pratápolis", path_f, sep=None, engine='python', encoding='utf-8', header=[0,1])
+    df_f = _fonte(sid, "Fichas", path_f, sep=None, engine='python', encoding='utf-8', header=[0,1])
     new_cols = []
     for col in df_f.columns:
         new_cols.append(col[1].strip() if "Unnamed" in col[0]
@@ -197,7 +197,7 @@ def load_all_data():
     # ── RECEITAS — header real está na linha 0 dos dados ─────────────────────
     # IMPORTANTE: 'Atualização Quadrimestral' NÃO está em COLS_R para evitar
     # double-parse (o bloco FUNDEB aplicará limpar_valor uma única vez na string bruta).
-    df_r_raw = _fonte(sid, "Pratápolis_R", path_r, sep=None, engine='python', encoding='utf-8', header=0)
+    df_r_raw = _fonte(sid, "Receitas", path_r, sep=None, engine='python', encoding='utf-8', header=0)
     df_r = df_r_raw.copy()
     df_r.columns = df_r.iloc[0].fillna('').str.strip()
     df_r = df_r.iloc[1:].reset_index(drop=True)
@@ -212,7 +212,7 @@ def load_all_data():
             df_r[col] = df_r[col].apply(limpar_valor)
 
     # ── DESPESAS POR FONTE — estágio inferido da coluna 'Empenhado' ───────────
-    df_df = _fonte(sid, "Pratápolis_DF", path_df, sep=None, engine='python', encoding='utf-8')
+    df_df = _fonte(sid, "Despesas por fonte", path_df, sep=None, engine='python', encoding='utf-8')
     df_df.columns = [str(c).strip() for c in df_df.columns]
     df_df = df_df.rename(columns={'Empenhado': 'Tipo', 'nº': 'Fonte'})
     df_df['Tipo'] = df_df['Tipo'].where(
@@ -230,8 +230,23 @@ def load_all_data():
 
 df_f_raw, df_r, df_df_raw = load_all_data()
 
-meses_disponiveis = ['Janeiro','Fevereiro']
+def _detectar_meses(df_f, df_r, df_df):
+    meses = []
+    for m in ORDEM_MESES:
+        tem = False
+        cl = f"{m}_Liquidado"
+        if df_f is not None and cl in df_f.columns and df_f[cl].abs().sum() > 0:
+            tem = True
+        if df_r is not None and m in df_r.columns and \
+           pd.to_numeric(df_r[m], errors='coerce').abs().sum() > 0:
+            tem = True
+        if df_df is not None and m in df_df.columns and df_df[m].abs().sum() > 0:
+            tem = True
+        if tem:
+            meses.append(m)
+    return meses if meses else ['Janeiro']
 
+meses_disponiveis = _detectar_meses(df_f_raw, df_r, df_df_raw)
 if df_f_raw is not None and df_r is not None:
 
     # ── SIDEBAR ───────────────────────────────────────────────────────────────
@@ -1169,7 +1184,7 @@ if df_f_raw is not None and df_r is not None:
                     unsafe_allow_html=True)
         st.markdown("---")
 
-        liq_cols = [f"{m}_Liquidado" for m in ['Janeiro','Fevereiro']
+        liq_cols = [f"{m}_Liquidado" for m in meses_disponiveis
                     if f"{m}_Liquidado" in df_f_raw.columns]
 
         CAPITAL_ELEMENTOS = [
@@ -1273,7 +1288,7 @@ if df_f_raw is not None and df_r is not None:
             'Aposentadorias, Reserva Remunerada e Reformas',
             '- Aposentadorias, Reserva Remunerada e Reformas',
         ]
-        liq_cols_f = [f"{m}_Liquidado" for m in ['Janeiro','Fevereiro']
+        liq_cols_f = [f"{m}_Liquidado" for m in meses_disponiveis
                       if f"{m}_Liquidado" in df_f_raw.columns]
 
         df_folha = df_f_raw[df_f_raw['Elemento'].isin(FOLHA_ELEMENTOS)].copy()
@@ -1369,7 +1384,7 @@ if df_f_raw is not None and df_r is not None:
 
         st.subheader("🔹 3. Evolução Mensal da Folha")
         dados_mensal_f = []
-        for m in ['Janeiro','Fevereiro']:
+        for m in meses_disponiveis:
             col = f"{m}_Liquidado"
             if col not in df_folha.columns: continue
             for orig in df_folha['Origem'].unique():

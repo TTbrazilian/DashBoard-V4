@@ -185,7 +185,7 @@ def load_all_data():
     if not sid and (not path_f or not path_r or not path_df): return None, None, None
 
     # ── FICHAS — cabeçalho duplo padrão ──────────────────────────────────────
-    df_f = _fonte(sid, "Restinga", path_f, sep=None, engine='python', encoding='utf-8', header=[0,1])
+    df_f = _fonte(sid, "Fichas", path_f, sep=None, engine='python', encoding='utf-8', header=[0,1])
     new_cols = []
     for col in df_f.columns:
         new_cols.append(col[1].strip() if "Unnamed" in col[0]
@@ -200,7 +200,7 @@ def load_all_data():
     # ── RECEITAS — header=0 direto (diferente de Pratápolis) ─────────────────
     # Coluna orçado = 'Orçado Receitas'. Categorias com espaço no final → strip().
     # 'Atualização Quadrimestral' NÃO incluída em COLS_R (evita double-parse).
-    df_r = _fonte(sid, "Restinga_R", path_r, sep=None, engine='python', encoding='utf-8', header=0)
+    df_r = _fonte(sid, "Receitas", path_r, sep=None, engine='python', encoding='utf-8', header=0)
     df_r.columns = [str(c).strip() for c in df_r.columns]
     COLS_R = ORDEM_MESES + ['Total','Orçado Receitas','Repasse','2025']
     for col in df_r.columns:
@@ -208,7 +208,7 @@ def load_all_data():
             df_r[col] = df_r[col].apply(limpar_valor)
 
     # ── DESPESAS POR FONTE — estrutura limpa, sem cabeçalho repetido ──────────
-    df_df = _fonte(sid, "Restinga_DF", path_df, sep=None, engine='python', encoding='utf-8')
+    df_df = _fonte(sid, "Despesas por fonte", path_df, sep=None, engine='python', encoding='utf-8')
     df_df.columns = [str(c).strip() for c in df_df.columns]
     df_df = df_df[df_df['Tipo'].isin(['Empenhado','Liquidado','Pago'])].copy()
     df_df['Tipo']  = df_df['Tipo'].str.strip()

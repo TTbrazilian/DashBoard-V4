@@ -189,7 +189,7 @@ def load_all_data():
     if not sid and (not path_f or not path_r or not path_df): return None, None, None
 
     # Fichas — cabeçalho duplo
-    df_f = _fonte(sid, "Capetinga", path_f, sep=None, engine='python', encoding='utf-8', header=[0,1])
+    df_f = _fonte(sid, "Fichas", path_f, sep=None, engine='python', encoding='utf-8', header=[0,1])
     new_cols = []
     for col in df_f.columns:
         new_cols.append(col[1].strip() if "Unnamed" in col[0]
@@ -197,11 +197,11 @@ def load_all_data():
     df_f.columns = new_cols
 
     # Receitas — header=0 obrigatório
-    df_r = _fonte(sid, "Capetinga_R", path_r, sep=None, engine='python', encoding='utf-8', header=0)
+    df_r = _fonte(sid, "Receitas", path_r, sep=None, engine='python', encoding='utf-8', header=0)
     df_r.columns = [str(c).strip() for c in df_r.columns]
 
     # Despesas por fonte
-    df_df = _fonte(sid, "Capetinga_DF", path_df, sep=None, engine='python', encoding='utf-8')
+    df_df = _fonte(sid, "Despesas por fonte", path_df, sep=None, engine='python', encoding='utf-8')
     df_df.columns = [str(c).strip() for c in df_df.columns]
 
     # Limpeza numérica — F

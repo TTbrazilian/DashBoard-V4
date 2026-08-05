@@ -176,7 +176,7 @@ def load_all_data():
     if not sid and (not path_f or not path_r or not path_df): return None, None, None
 
     # Fichas — cabeçalho duplo
-    df_f = _fonte(sid, "Itamogi", path_f, sep=None, engine='python', encoding='utf-8', header=[0,1])
+    df_f = _fonte(sid, "Fichas", path_f, sep=None, engine='python', encoding='utf-8', header=[0,1])
     new_cols = []
     for col in df_f.columns:
         new_cols.append(col[1].strip() if "Unnamed" in col[0]
@@ -188,7 +188,7 @@ def load_all_data():
             df_f[col] = df_f[col].apply(limpar_valor)
 
     # Receitas — header=0 direto
-    df_r = _fonte(sid, "Itamogi_R", path_r, sep=None, engine='python', encoding='utf-8', header=0)
+    df_r = _fonte(sid, "Receitas", path_r, sep=None, engine='python', encoding='utf-8', header=0)
     df_r.columns = [str(c).strip() for c in dr.columns] if False else [str(c).strip() for c in df_r.columns]
     COLS_R = ORDEM_MESES + ['Total','Orçado Receitas','Repasse','2025']
     for col in df_r.columns:
@@ -196,7 +196,7 @@ def load_all_data():
             df_r[col] = df_r[col].apply(limpar_valor)
 
     # Despesas por fonte
-    df_df = _fonte(sid, "Itamogi_DF", path_df, sep=None, engine='python', encoding='utf-8')
+    df_df = _fonte(sid, "Despesas por fonte", path_df, sep=None, engine='python', encoding='utf-8')
     df_df.columns = [str(c).strip() for c in df_df.columns]
     for col in df_df.columns:
         if col in ORDEM_MESES + ['Total']:
@@ -211,8 +211,23 @@ def load_all_data():
 df_f_raw, df_r, df_df_raw = load_all_data()
 
 # ATUALIZADO: 4 meses disponíveis
-meses_disponiveis = ['Janeiro','Fevereiro','Março','Abril']
+def _detectar_meses(df_f, df_r, df_df):
+    meses = []
+    for m in ORDEM_MESES:
+        tem = False
+        cl = f"{m}_Liquidado"
+        if df_f is not None and cl in df_f.columns and df_f[cl].abs().sum() > 0:
+            tem = True
+        if df_r is not None and m in df_r.columns and \
+           pd.to_numeric(df_r[m], errors='coerce').abs().sum() > 0:
+            tem = True
+        if df_df is not None and m in df_df.columns and df_df[m].abs().sum() > 0:
+            tem = True
+        if tem:
+            meses.append(m)
+    return meses if meses else ['Janeiro']
 
+meses_disponiveis = _detectar_meses(df_f_raw, df_r, df_df_raw)
 if df_f_raw is not None and df_r is not None:
 
     st.sidebar.title("🔍 Filtros de Análise")

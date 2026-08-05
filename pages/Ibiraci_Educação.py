@@ -187,7 +187,7 @@ def load_all_data():
     if not sid and (not path_f or not path_r or not path_df): return None, None, None
 
     # ── FICHAS — cabeçalho duplo padrão ──────────────────────────────────────
-    df_f = _fonte(sid, "Ibiraci", path_f, sep=None, engine='python', encoding='utf-8', header=[0,1])
+    df_f = _fonte(sid, "Fichas", path_f, sep=None, engine='python', encoding='utf-8', header=[0,1])
     new_cols = []
     for col in df_f.columns:
         new_cols.append(col[1].strip() if "Unnamed" in col[0]
@@ -202,7 +202,7 @@ def load_all_data():
     # ── RECEITAS — header=0 direto + normalização de nomes de colunas ────────
     # Ibiraci_R.csv: meses em minúsculas → normalizar para título.
     # 'TOTAL' → 'Total'. 'Atualização Quadrimestral' NÃO incluída em COLS_R.
-    df_r = _fonte(sid, "Ibiraci_R", path_r, sep=None, engine='python', encoding='utf-8', header=0)
+    df_r = _fonte(sid, "Receitas", path_r, sep=None, engine='python', encoding='utf-8', header=0)
     df_r.columns = [str(c).strip() for c in df_r.columns]
     # Normaliza nomes de colunas de meses (case-insensitive)
     meses_norm = {m.lower(): m for m in ORDEM_MESES}
@@ -221,7 +221,7 @@ def load_all_data():
             df_r[col] = df_r[col].apply(limpar_valor)
 
     # ── DESPESAS POR FONTE — estrutura limpa, remove Tipo='Tipo' ─────────────
-    df_df = _fonte(sid, "Ibiraci_DF", path_df, sep=None, engine='python', encoding='utf-8')
+    df_df = _fonte(sid, "Despesas por fonte", path_df, sep=None, engine='python', encoding='utf-8')
     df_df.columns = [str(c).strip() for c in df_df.columns]
     df_df = df_df[df_df['Tipo'].isin(['Empenhado','Liquidado','Pago'])].copy()
     df_df['Tipo']  = df_df['Tipo'].str.strip()
@@ -234,8 +234,23 @@ def load_all_data():
 
 df_f_raw, df_r, df_df_raw = load_all_data()
 
-meses_disponiveis = ['Janeiro','Fevereiro','Março', 'Abril']
+def _detectar_meses(df_f, df_r, df_df):
+    meses = []
+    for m in ORDEM_MESES:
+        tem = False
+        cl = f"{m}_Liquidado"
+        if df_f is not None and cl in df_f.columns and df_f[cl].abs().sum() > 0:
+            tem = True
+        if df_r is not None and m in df_r.columns and \
+           pd.to_numeric(df_r[m], errors='coerce').abs().sum() > 0:
+            tem = True
+        if df_df is not None and m in df_df.columns and df_df[m].abs().sum() > 0:
+            tem = True
+        if tem:
+            meses.append(m)
+    return meses if meses else ['Janeiro']
 
+meses_disponiveis = _detectar_meses(df_f_raw, df_r, df_df_raw)
 if df_f_raw is not None and df_r is not None:
 
     # ── SIDEBAR ───────────────────────────────────────────────────────────────
