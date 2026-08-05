@@ -178,6 +178,34 @@ def _fonte(sid, aba, path_local, **kwargs):
     return pd.read_csv(path_local, **kwargs)
 
 
+# ── NORMALIZAÇÃO DE CABEÇALHOS DE MÊS (regra universal iG2P) ──────────────────
+# Corrige a captura de valores quando o cabeçalho de um mês vem grafado de forma
+# diferente entre as abas (ex.: "MAIO", "Maio ", "Maio/2025", "maio"). Sem isto,
+# soma() procura a coluna exata "Maio" e devolve 0 embora a base tenha o dado.
+def _canon_mes(nome):
+    base = str(nome).strip().lower().replace('ç', 'c').replace('ã', 'a')
+    tok = ''
+    for ch in base:
+        if ch.isalpha():
+            tok += ch
+        else:
+            break
+    for _mes in ORDEM_MESES:
+        if tok == _mes.lower().replace('ç', 'c').replace('ã', 'a'):
+            return _mes
+    return None
+
+def _canoniza_meses_flat(df):
+    if df is None:
+        return df
+    ren = {}
+    for c in list(df.columns):
+        cm = _canon_mes(c)
+        if cm and c != cm and cm not in df.columns:
+            ren[c] = cm
+    return df.rename(columns=ren) if ren else df
+
+
 @st.cache_data
 def load_all_data():
     path_f  = buscar_arquivo("zEducação/Ibiraci.csv")
@@ -190,8 +218,11 @@ def load_all_data():
     df_f = _fonte(sid, "Fichas", path_f, sep=None, engine='python', encoding='utf-8', header=[0,1])
     new_cols = []
     for col in df_f.columns:
-        new_cols.append(col[1].strip() if "Unnamed" in col[0]
-                        else f"{col[1].strip()}_{col[0].strip()}")
+        if "Unnamed" in col[0]:
+            new_cols.append(col[1].strip())
+        else:
+            _mes_c = _canon_mes(col[1].strip()) or col[1].strip()
+            new_cols.append(f"{_mes_c}_{col[0].strip()}")
     df_f.columns = new_cols
     for col in df_f.columns:
         if any(k in col for k in ['Orçado','Saldo','Liquidado','Empenhado','Pago',
@@ -230,6 +261,8 @@ def load_all_data():
         if col in ORDEM_MESES + ['Total']:
             df_df[col] = df_df[col].apply(limpar_valor)
 
+    df_r  = _canoniza_meses_flat(df_r)
+    df_df = _canoniza_meses_flat(df_df)
     return df_f, df_r, df_df
 
 df_f_raw, df_r, df_df_raw = load_all_data()
