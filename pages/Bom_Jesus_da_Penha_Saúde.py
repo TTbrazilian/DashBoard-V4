@@ -139,15 +139,17 @@ FONTES_PROPRIAS = ['1500']
 def origem_da_fonte(f): return ORIGEM_FONTE.get(str(f).strip())
 
 # Elementos de folha/pessoal (ajustável). Usados em "Folha por Fonte".
+# Folha de Pagamento — Bom Jesus da Penha (definido pelo município).
+# Só estes elementos entram como folha; o restante NÃO é folha.
+# Obs.: 'Outros Auxílios  financeiros PF' tem espaço duplo (grafia da planilha).
 FOLHA_ELEMENTOS = [
     'Vencimentos e Vantagens Fixas - Pessoal Civil',
     'Obrigações Patronais',
     'Contratação por tempo Determinado',
     'Outras Despesas Variáveis - Pessoal Civil',
     'Indenizações e Restituições Trabalhistas',
-    'Auxílio-Alimentação',
     'Diárias - Pessoal Civil',
-    'Outras Despesas de Pessoal decorrentes de Contratos',
+    'Outros Auxílios  financeiros PF',
 ]
 
 CAPITAL_ELEM = [
