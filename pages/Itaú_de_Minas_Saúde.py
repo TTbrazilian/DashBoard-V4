@@ -1,5 +1,11 @@
 import streamlit as st
 import pandas as pd
+from io import BytesIO
+from datetime import datetime
+import io
+import csv
+import gspread
+from google.oauth2.service_account import Credentials
 import plotly.express as px
 import plotly.io as pio
 import os
@@ -177,6 +183,37 @@ def soma_cols(df, cols):
 # • Itaú de Minas_R.csv  — Receitas de Impostos + Cota-Parte (base do índice de 15%).
 # • Itaú de Minas_DF.csv — Despesas por Fonte (blocos Empenhado/Liquidado/Pago; fonte 1500 = próprio).
 # • Itaú de Minas_RV.csv — Receitas Vinculadas Federais/Estaduais por categoria (novo).
+# ── LEITURA VIA GOOGLE SHEETS (com fallback CSV local durante a migração) ─────
+@st.cache_resource
+def _conectar_sheets():
+    escopos = ["https://www.googleapis.com/auth/spreadsheets.readonly",
+               "https://www.googleapis.com/auth/drive.readonly"]
+    cred = Credentials.from_service_account_info(
+        dict(st.secrets["gcp_service_account"]), scopes=escopos)
+    return gspread.authorize(cred)
+
+
+def _ler_aba(sheet_id, aba, **read_csv_kwargs):
+    """Lê uma aba do Google Sheets com a MESMA semântica do pd.read_csv de arquivo
+    (reconstrói o CSV a partir das células e reusa pd.read_csv; byte-fiel)."""
+    ws = _conectar_sheets().open_by_key(sheet_id).worksheet(aba)
+    buf = io.StringIO()
+    csv.writer(buf).writerows(ws.get_all_values())
+    buf.seek(0)
+    return pd.read_csv(buf, **read_csv_kwargs)
+
+
+def _fonte(sid, aba, path_local, **kwargs):
+    """Fonte de dados: Google Sheets (se sid configurado) → CSV local (fallback)."""
+    if sid:
+        try:
+            kw = {k: v for k, v in kwargs.items() if k != "encoding"}
+            return _ler_aba(sid, aba, **kw)
+        except Exception:
+            pass
+    return pd.read_csv(path_local, **kwargs)
+
+
 @st.cache_data
 def load_data():
     diretorio_atual = os.path.dirname(os.path.abspath(__file__))
@@ -191,10 +228,11 @@ def load_data():
     path_r  = _buscar("Itaú de Minas_R.csv")
     path_df = _buscar("Itaú de Minas_DF.csv")
     path_rv = _buscar("Itaú de Minas_RV.csv")
-    if not path_f: return None, None, None, None
+    sid = st.secrets.get("saude", {}).get("Itaú de Minas", "")
+    if not sid and not path_f: return None, None, None, None
 
     # ── FICHAS ───────────────────────────────────────────────────────────────
-    df = pd.read_csv(path_f, sep=None, engine='python', encoding='utf-8', header=1)
+    df = _fonte(sid, "Itaú de Minas", path_f, sep=None, engine='python', encoding='utf-8', header=1)
     df.columns = [str(c).strip() for c in df.columns]
     for col in df.columns:
         if any(k in col for k in ['Orçado','Creditado','Anulado','Saldo'] + MESES_ORDEM + ['Total']):
@@ -217,7 +255,7 @@ def load_data():
     # ── RECEITAS (Impostos + Cota-Parte) ─────────────────────────────────────
     df_r = None
     if path_r:
-        df_r = pd.read_csv(path_r, sep=None, engine='python', encoding='utf-8', header=0)
+        df_r = _fonte(sid, "Itaú de Minas_R", path_r, sep=None, engine='python', encoding='utf-8', header=0)
         df_r.columns = [str(c).strip() for c in df_r.columns]
         if 'Categoria' in df_r.columns:
             df_r['Categoria'] = df_r['Categoria'].astype(str).str.strip()
@@ -228,7 +266,7 @@ def load_data():
     # ── DESPESAS POR FONTE ───────────────────────────────────────────────────
     df_df = None
     if path_df:
-        df_df = pd.read_csv(path_df, sep=None, engine='python', encoding='utf-8')
+        df_df = _fonte(sid, "Itaú de Minas_DF", path_df, sep=None, engine='python', encoding='utf-8')
         df_df.columns = [str(c).strip() for c in df_df.columns]
         df_df['Tipo'] = df_df['Tipo'].replace({'Empenho': 'Liquidado'})
         df_df = df_df[df_df['Tipo'].isin(['Empenhado','Liquidado','Pago'])].copy()
@@ -241,7 +279,7 @@ def load_data():
     # ── RECEITAS VINCULADAS (Federal/Estadual por categoria) ─────────────────
     df_rv = None
     if path_rv:
-        df_rv = pd.read_csv(path_rv, sep=None, engine='python', encoding='utf-8', header=0)
+        df_rv = _fonte(sid, "Itaú de Minas_RV", path_rv, sep=None, engine='python', encoding='utf-8', header=0)
         df_rv.columns = [str(c).strip() for c in df_rv.columns]
         for c in ['Origem','Tipo','Categoria']:
             if c in df_rv.columns: df_rv[c] = df_rv[c].astype(str).str.strip()
@@ -307,6 +345,203 @@ if _LOGO_ESCURO or _LOGO_CLARO:
     """, unsafe_allow_html=True)
 
 
+# ── RELATÓRIO DE CONSULTORIA — SAÚDE (PDF gerado na hora) ─────────────────────
+RELATORIO_SECRETARIA = ""   # nome da Secretária(o) de Saúde (opcional; vazio = oculto)
+
+
+def _rel_tab_saude(data, header_color, zebra, col_widths=None):
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.platypus import Table, TableStyle
+    if col_widths is None:
+        col_widths = [95*mm, 75*mm]
+    t = Table(data, colWidths=col_widths, hAlign='LEFT')
+    style = [('BACKGROUND',(0,0),(-1,0),header_color),('TEXTCOLOR',(0,0),(-1,0),colors.white),
+        ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('FONTSIZE',(0,0),(-1,-1),9),
+        ('ALIGN',(1,0),(-1,-1),'LEFT'),('GRID',(0,0),(-1,-1),0.4,colors.HexColor('#cccccc')),
+        ('VALIGN',(0,0),(-1,-1),'MIDDLE'),('TOPPADDING',(0,0),(-1,-1),4),
+        ('BOTTOMPADDING',(0,0),(-1,-1),4),('LEFTPADDING',(0,0),(-1,-1),6)]
+    for r in range(1, len(data)):
+        if r % 2 == 1:
+            style.append(('BACKGROUND',(0,r),(-1,r),zebra))
+    t.setStyle(TableStyle(style)); return t
+
+
+def _dados_relatorio_saude(df, df_r, df_df, df_rv, meses):
+    """Indicadores do relatório de Saúde (uniformes; reusa as constantes da página)."""
+    d = {'periodo': f"{meses[0]}–{meses[-1]}" if meses else "—"}
+    cols_liq = [f"{m}_Liq" for m in meses if f"{m}_Liq" in df.columns]
+    # constantes da página (com fallback — o relatório é portável entre municípios)
+    _FP = globals().get('FONTES_PROPRIAS', ['1500'])
+    _orig = globals().get('origem_da_fonte', lambda f: None)
+    _FE = globals().get('FOLHA_ELEMENTOS', [])
+
+    orcado = df['Orçado'].sum() if 'Orçado' in df.columns else 0.0
+    liq = (df[cols_liq].sum().sum() if cols_liq
+           else (df['Total_Liq'].sum() if 'Total_Liq' in df.columns else 0.0))
+    d.update(orcado=orcado, liquidado=liq, saldo=orcado - liq,
+             perc_exec=(liq / orcado * 100) if orcado > 0 else 0.0)
+
+    base = df_r[df_r['Categoria'].astype(str).str.strip().isin(['Impostos', 'Cota-Parte'])]
+    base_15 = soma_cols(base, meses)
+    aplic = df_df[(df_df['Fonte'] == '1500') & (df_df['Tipo'] == 'Liquidado')]
+    aplic_15 = soma_cols(aplic, meses)
+    d.update(base_15=base_15, aplic_15=aplic_15, minimo_15=base_15 * 0.15,
+             indice_15=(aplic_15 / base_15 * 100) if base_15 > 0 else 0.0)
+
+    def _rv(org):
+        if df_rv is None or 'Origem' not in df_rv.columns:
+            return 0.0
+        return soma_cols(df_rv[df_rv['Origem'].astype(str).str.strip() == org], meses)
+
+    def _desp(org):
+        dd = df_df[(df_df['Tipo'] == 'Liquidado') & (~df_df['Fonte'].isin(_FP))]
+        dd = dd[dd['Fonte'].map(_orig) == org]
+        return soma_cols(dd, meses)
+
+    rf, re_ = _rv('Federal'), _rv('Estadual')
+    df_, de_ = _desp('Federal'), _desp('Estadual')
+    d.update(rec_fed=rf, rec_est=re_, rec_vinc=rf + re_,
+             desp_fed=df_, desp_est=de_, desp_vinc=df_ + de_,
+             saldo_vinc=(rf + re_) - (df_ + de_))
+
+    tc = df[df['Natureza'] == 'Custeio (Manut.)']['Total_Liq'].sum() if 'Natureza' in df.columns else 0.0
+    tk = df[df['Natureza'] == 'Capital (Invest.)']['Total_Liq'].sum() if 'Natureza' in df.columns else 0.0
+    d.update(custeio=tc, capital=tk)
+
+    folha = df[df['Elemento'].isin(_FE)] if 'Elemento' in df.columns else df.iloc[0:0]
+    d['folha'] = (folha[cols_liq].sum().sum() if cols_liq
+                  else (folha['Total_Liq'].sum() if 'Total_Liq' in folha.columns else 0.0))
+    return d
+
+
+def _pdf_relatorio_saude(d, municipio, secretaria=None):
+    """Gera o PDF do relatório gerencial de Saúde."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
+                                    TableStyle, HRFlowable)
+    from reportlab.lib.enums import TA_CENTER
+
+    if secretaria is None:
+        secretaria = RELATORIO_SECRETARIA
+    AZUL = colors.HexColor('#003366'); VERDE = colors.HexColor('#1a7a4a')
+    VERM = colors.HexColor('#b00020'); LARANJA = colors.HexColor('#b9770e')
+    CINZA = colors.HexColor('#f0f2f5')
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=18*mm, rightMargin=18*mm,
+                            topMargin=16*mm, bottomMargin=16*mm, title="IG2P - Relatórios",
+                            author="iG2P — Plataforma de Gestão Pública",
+                            subject=f"Relatório Analítico e Gerencial — Saúde ({municipio})")
+    ss = getSampleStyleSheet()
+    h_title = ParagraphStyle('t', parent=ss['Title'], fontSize=16, textColor=AZUL, alignment=TA_CENTER, spaceAfter=2)
+    h_sub = ParagraphStyle('s', parent=ss['Normal'], fontSize=9.5, textColor=colors.grey, alignment=TA_CENTER, spaceAfter=10)
+    h2 = ParagraphStyle('h2', parent=ss['Heading2'], fontSize=12, textColor=AZUL, spaceBefore=10, spaceAfter=4)
+    body = ParagraphStyle('b', parent=ss['Normal'], fontSize=9.5, leading=13)
+    a_ok = ParagraphStyle('aok', parent=body, textColor=VERDE)
+    a_bad = ParagraphStyle('abad', parent=body, textColor=VERM)
+    a_warn = ParagraphStyle('awarn', parent=body, textColor=LARANJA)
+    legal = ParagraphStyle('legal', parent=body, fontSize=8.2, textColor=colors.HexColor('#555'), leftIndent=2)
+
+    def base_legal(txt):
+        return Paragraph(f"<b>Base legal:</b> {txt}", legal)
+
+    el = []
+    el.append(Paragraph("Relatório Analítico e Gerencial — Saúde", h_title))
+    el.append(Paragraph("Consultoria iG2P — Plataforma de Gestão Pública", h_sub))
+    el.append(HRFlowable(width="100%", color=AZUL, thickness=1.2, spaceAfter=8))
+
+    # 1. Informações
+    el.append(Paragraph("1. Informações da Reunião", h2))
+    hoje = datetime.now().strftime("%d/%m/%Y")
+    info = [["Município:", f"{municipio} - MG"]]
+    if (secretaria or "").strip():
+        info.append(["Secretária(o) de Saúde:", secretaria.strip()])
+    info.append(["Data:", hoje])
+    info.append(["Pauta Principal:", f"Análise de dados financeiros e orçamentários da "
+                                     f"Saúde ({d['periodo']})."])
+    t = Table(info, colWidths=[48*mm, 122*mm])
+    t.setStyle(TableStyle([('FONTNAME',(0,0),(0,-1),'Helvetica-Bold'),('FONTSIZE',(0,0),(-1,-1),9.5),
+        ('TEXTCOLOR',(0,0),(0,-1),AZUL),('VALIGN',(0,0),(-1,-1),'TOP'),('BOTTOMPADDING',(0,0),(-1,-1),3)]))
+    el.append(t)
+
+    # 2. Execução Orçamentária
+    el.append(Paragraph("2. Execução Orçamentária", h2))
+    el.append(_rel_tab_saude([["Indicador", "Valor"],
+        ["Previsão (Orçado)", formar_real(d['orcado'])],
+        [f"Executado / Liquidado ({d['periodo']})", formar_real(d['liquidado'])],
+        ["Saldo Orçamentário", formar_real(d['saldo'])],
+        ["% de Execução", f"{d['perc_exec']:.2f}%".replace('.', ',')],
+    ], AZUL, CINZA))
+
+    # 3. Aplicação Mínima em Saúde (15%)
+    el.append(Paragraph("3. Aplicação Mínima em Saúde (15%)", h2))
+    el.append(_rel_tab_saude([["Indicador", "Valor"],
+        [f"Receita Base (Impostos + Cota-Parte, {d['periodo']})", formar_real(d['base_15'])],
+        ["Mínimo Constitucional (15%)", formar_real(d['minimo_15'])],
+        ["Aplicado em Saúde (Recurso Próprio — Fonte 1500)", formar_real(d['aplic_15'])],
+    ], AZUL, CINZA))
+    idx = d['indice_15']
+    if idx < 15:
+        el.append(Paragraph(f"⚠ Alerta crítico: o índice de aplicação em saúde está em "
+            f"<b>{idx:.2f}%</b>, <b>abaixo</b> do mínimo constitucional de 15%. É necessário "
+            f"ampliar a aplicação de recursos próprios em ações e serviços públicos de saúde "
+            f"até o encerramento do exercício.", a_bad))
+    else:
+        el.append(Paragraph(f"✔ O índice de aplicação em saúde está em <b>{idx:.2f}%</b>, "
+            f"cumprindo o mínimo constitucional de 15% de recursos próprios em ações e "
+            f"serviços públicos de saúde.", a_ok))
+    el.append(base_legal("Constituição Federal, art. 198, §2º, III e §3º; Emenda Constitucional "
+        "nº 29/2000; Lei Complementar nº 141/2012 (define as ações e serviços públicos de saúde "
+        "e a base de cálculo do mínimo de 15% para os Municípios)."))
+
+    # 4. Recursos Vinculados
+    el.append(Paragraph("4. Recursos Vinculados (Transferências SUS)", h2))
+    sv = d['saldo_vinc']
+    el.append(_rel_tab_saude([["Origem", "Receita", "Despesa", "Saldo"],
+        ["Federal", formar_real(d['rec_fed']), formar_real(d['desp_fed']),
+         formar_real(d['rec_fed'] - d['desp_fed'])],
+        ["Estadual", formar_real(d['rec_est']), formar_real(d['desp_est']),
+         formar_real(d['rec_est'] - d['desp_est'])],
+        ["Total", formar_real(d['rec_vinc']), formar_real(d['desp_vinc']), formar_real(sv)],
+    ], AZUL, CINZA, col_widths=[38*mm, 44*mm, 44*mm, 44*mm]))
+    if sv >= 0:
+        el.append(Paragraph(f"✔ As receitas vinculadas superam as despesas no período, com saldo "
+            f"de <b>{formar_real(sv)}</b> a executar. Recomenda-se planejar a aplicação dos "
+            f"recursos vinculados dentro dos respectivos blocos de financiamento do SUS.", a_ok))
+    else:
+        el.append(Paragraph(f"⚠ As despesas vinculadas superam as receitas do período em "
+            f"<b>{formar_real(abs(sv))}</b>, indicando uso de recursos próprios para cobrir "
+            f"ações vinculadas. Recomenda-se revisar a execução por bloco.", a_warn))
+    el.append(base_legal("Lei Complementar nº 141/2012, arts. 2º e 3º; transferências fundo a "
+        "fundo do SUS (Blocos de Custeio e de Investimento das Ações e Serviços de Saúde)."))
+
+    # 5. Despesas por Natureza
+    el.append(Paragraph("5. Despesas por Natureza", h2))
+    el.append(_rel_tab_saude([["Natureza", "Valor Liquidado"],
+        ["Custeio (Manutenção)", formar_real(d['custeio'])],
+        ["Capital (Investimento)", formar_real(d['capital'])],
+    ], AZUL, CINZA))
+
+    # 6. Folha de Pagamento
+    el.append(Paragraph("6. Folha de Pagamento", h2))
+    el.append(_rel_tab_saude([["Indicador", "Valor"],
+        [f"Folha de Pagamento — Saúde ({d['periodo']})", formar_real(d['folha'])],
+    ], AZUL, CINZA))
+
+    el.append(Spacer(1, 6))
+    el.append(HRFlowable(width="100%", color=colors.HexColor('#cccccc'), thickness=0.6, spaceAfter=4))
+    el.append(Paragraph("Documento gerado automaticamente pela plataforma iG2P — Inteligência em "
+        "Gestão Pública. Os valores refletem a base de dados do período analisado.", h_sub))
+
+    doc.build(el)
+    buf.seek(0)
+    return buf.getvalue()
+
+
 df_raw, df_r, df_df, df_rv = load_data()
 
 def _detectar_meses(df_f, df_dfonte):
@@ -319,7 +554,7 @@ def _detectar_meses(df_f, df_dfonte):
             v_d = df_dfonte[df_dfonte['Tipo'] == 'Liquidado'][m].sum()
         if abs(v_f) > 0.005 or abs(v_d) > 0.005:
             out.append(m)
-    return out or ['Janeiro','Fevereiro','Março','Abril','Maio']
+    return out or ['Janeiro','Fevereiro','Março','Abril']
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -328,6 +563,24 @@ def _detectar_meses(df_f, df_dfonte):
 if df_raw is not None:
 
     meses_disp = _detectar_meses(df_raw, df_df)
+
+    # ── RELATÓRIO PDF (regra geral iG2P) ──────────────────────────────────────
+    try:
+        _mun_rel = os.path.splitext(os.path.basename(__file__))[0].replace('_Saúde', '').replace('_', ' ')
+    except NameError:
+        _mun_rel = "Município"
+    try:
+        if '_pdf_saude_bytes' not in st.session_state:
+            st.session_state['_pdf_saude_bytes'] = _pdf_relatorio_saude(
+                _dados_relatorio_saude(df_raw, df_r, df_df, df_rv, meses_disp), _mun_rel)
+        st.sidebar.download_button(
+            "📄 Gerar Relatório (PDF)",
+            data=st.session_state['_pdf_saude_bytes'],
+            file_name=f"Relatorio_Saude_{_mun_rel}.pdf",
+            mime="application/pdf", use_container_width=True)
+    except Exception:
+        st.sidebar.caption("Relatório indisponível no momento.")
+
     cols_liq = [f"{m}_Liq" for m in meses_disp if f"{m}_Liq" in df_raw.columns]
     cats = sorted(df_raw['Categoria'].dropna().unique())
 
