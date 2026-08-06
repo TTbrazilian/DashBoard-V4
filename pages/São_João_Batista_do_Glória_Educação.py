@@ -269,6 +269,424 @@ def load_all_data():
     df_df = _canoniza_meses_flat(df_df)
     return df_f, df_r, df_df
 
+# ══════════════════════════════════════════════════════════════════════════════
+# LOADER central com logo (regra universal iG2P)
+# Criado ANTES de qualquer carregamento pesado e liberado só no FIM do script,
+# cobrindo o tempo real de carregamento (junto do indicador nativo do Streamlit).
+# ══════════════════════════════════════════════════════════════════════════════
+import base64 as _b64_loader
+
+
+def _logo_loader(nome):
+    cands = [f"Logos/{nome}", f"../Logos/{nome}"]
+    try:
+        _d = os.path.dirname(os.path.abspath(__file__))
+        cands += [os.path.join(_d, "Logos", nome), os.path.join(_d, "..", "Logos", nome)]
+    except NameError:
+        pass
+    for p in cands:
+        if os.path.exists(p):
+            return "data:image/png;base64," + _b64_loader.b64encode(open(p, "rb").read()).decode()
+    return ""
+
+
+_LOGO_ESCURO = _logo_loader("LOGOTIPO IG2P - OFICIAL - BRANCO.png")
+_LOGO_CLARO  = _logo_loader("LOGOTIPO IG2P - OFICIAL.png")
+
+if _LOGO_ESCURO or _LOGO_CLARO:
+    st.markdown(f"""
+    <div class="ig2p-loader">
+      <img class="ig2p-logo-escuro" src="{_LOGO_ESCURO}">
+      <img class="ig2p-logo-claro"  src="{_LOGO_CLARO}">
+    </div>
+    <style>
+      [data-testid="stElementContainer"]:has(.ig2p-loader),
+      .element-container:has(.ig2p-loader) {{
+        height:0!important; min-height:0!important; margin:0!important; padding:0!important;
+      }}
+      .ig2p-loader {{ position:fixed; inset:0; z-index:99999; pointer-events:none;
+        display:flex; align-items:center; justify-content:center;
+        background:#0E1117; opacity:1; transition:opacity .45s ease; }}
+      .ig2p-loader.ig2p-done {{ opacity:0; visibility:hidden; }}
+      .ig2p-loader img {{ width:150px; height:auto;
+        animation: ig2pPulse 1.1s ease-in-out infinite; }}
+      .ig2p-loader .ig2p-logo-claro {{ display:none; }}
+      @media (prefers-color-scheme: light) {{
+        .ig2p-loader {{ background:#FFFFFF; }}
+        .ig2p-loader .ig2p-logo-escuro {{ display:none; }}
+        .ig2p-loader .ig2p-logo-claro  {{ display:block; }}
+      }}
+      @keyframes ig2pPulse {{ 0%,100%{{opacity:.35;transform:scale(.94)}}
+                              50%{{opacity:1;transform:scale(1.05)}} }}
+    </style>
+    """, unsafe_allow_html=True)
+
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RELATÓRIO DE CONSULTORIA (padrão Itaú de Minas) — CONFIG DO MUNICÍPIO (REVISAR)
+#  _REL_DESC_25 : descontos do 25% (FUNDEB não util. + superávit + restos a pagar),
+#                 extraídos da seção "Recursos Próprios" deste município.
+#  _REL_FOLHA   : elementos de folha (mesma lista do gráfico "Folha de Pagamento").
+#  Fontes assumidas: próprios=15001 · FUNDEB 70%=15407 · FUNDEB 30%=15403.
+# ══════════════════════════════════════════════════════════════════════════════
+_REL_DESC_25 = 0.0
+_REL_FOLHA = [
+            'Vencimentos e Vantagens Fixas - Pessoal Civil',
+            'Obrigações Patronais',
+            'Contratação por tempo Determinado',
+            'Outras Despesas Variáveis - Pessoal Civil',
+            'Indenizações e Restituições Trabalhistas',
+            'Auxílio-alimentação',
+            'Aposentadorias, Reserva Remunerada e Reformas',
+            '- Aposentadorias, Reserva Remunerada e Reformas',
+            'Diárias - Pessoal Civil',
+            'Obrigações Tributárias e Contributivas',
+        ]
+
+def _rel_tabela(data, header_color, zebra, col_widths=None):
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.platypus import Table, TableStyle
+    if col_widths is None:
+        col_widths = [95*mm, 75*mm]
+    t = Table(data, colWidths=col_widths, hAlign='LEFT')
+    style = [
+        ('BACKGROUND',(0,0),(-1,0),header_color),
+        ('TEXTCOLOR',(0,0),(-1,0),colors.white),
+        ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),
+        ('FONTSIZE',(0,0),(-1,-1),9),
+        ('ALIGN',(1,0),(-1,-1),'LEFT'),
+        ('GRID',(0,0),(-1,-1),0.4,colors.HexColor('#cccccc')),
+        ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+        ('TOPPADDING',(0,0),(-1,-1),4),
+        ('BOTTOMPADDING',(0,0),(-1,-1),4),
+        ('LEFTPADDING',(0,0),(-1,-1),6),
+    ]
+    for r in range(1, len(data)):
+        if r % 2 == 1:
+            style.append(('BACKGROUND',(0,r),(-1,r),zebra))
+    t.setStyle(TableStyle(style))
+    return t
+
+def _dados_relatorio(df_f, df_r, df_df, meses):
+    """Calcula TODOS os indicadores do relatório (lógica Itaú de Minas),
+    independentemente do setor selecionado."""
+    d = {}
+    d['periodo'] = f"{meses[0]}–{meses[-1]}" if meses else "—"
+
+    def cat_receita(desc):
+        x = str(desc).upper().strip()
+        if 'VAAT' in x:                             return 'VAAT'
+        if 'VAAR' in x:                             return 'VAAR'
+        if 'ETI'  in x or 'TEMPO INTEGRAL' in x:    return 'ETI'
+        if 'APLICAÇÃO' in x or 'RENDIMENTOS' in x:  return 'Rendimentos'
+        return 'Principal'
+    dfb = df_r[df_r['Categoria'].str.strip() == 'FUNDEB'].copy()
+    dfb['Descrição da Receita'] = dfb['Descrição da Receita'].str.strip()
+    dfb['Sub'] = dfb['Descrição da Receita'].apply(cat_receita)
+    val_quad = dfb['Atualização Quadrimestral'].apply(limpar_valor).sum() \
+        if 'Atualização Quadrimestral' in dfb.columns else 0.0
+    tot_rec_periodo = soma(dfb, meses)
+    rend_fundeb = soma(dfb[dfb['Sub']=='Rendimentos'], meses)
+    dff = df_df[df_df['Fonte'].isin(['15407','15403'])]
+    desp_70 = soma(dff[(dff['Fonte']=='15407') & (dff['Tipo']=='Liquidado')], meses)
+    desp_30 = soma(dff[(dff['Fonte']=='15403') & (dff['Tipo']=='Liquidado')], meses)
+    tot_desp_vig = desp_70 + desp_30
+    base_70 = soma(dfb[dfb['Sub'].isin(['Principal','Rendimentos'])], meses)
+    perc_70 = (desp_70/base_70*100) if base_70>0 else 0.0
+    # Base ETI (ITM): Principal + Rendimentos + VAAT (só VAAT). Referência 4%.
+    base_eti = soma(dfb[dfb['Sub'].isin(['Principal','Rendimentos','VAAT'])], meses)
+    meta_eti = base_eti * 0.04
+    d.update(prev_quad=val_quad, fundeb_rec=tot_rec_periodo, fundeb_desp=tot_desp_vig,
+             fundeb_saldo=tot_rec_periodo-tot_desp_vig, base_70=base_70, desp_70=desp_70,
+             perc_70=perc_70, rend_fundeb=rend_fundeb, base_eti=base_eti, meta_eti=meta_eti)
+
+    base = df_r[df_r['Categoria'].str.strip().isin(['Impostos','Cota-Parte'])].copy()
+    ded  = df_r[df_r['Categoria'].str.strip().str.startswith('Dedução', na=False)].copy()
+    tot_rec_base = soma(base, meses)
+    tot_ded      = abs(soma(ded, meses))
+    d15001 = df_df[(df_df['Fonte']=='15001') & (df_df['Tipo']=='Liquidado')]
+    total_15001 = soma(d15001, meses)
+    # Descontos do 25% (individualidade do município) — ver _REL_DESC_25 no topo.
+    _total_desc = _REL_DESC_25
+    esforco = max(0.0, total_15001 + tot_ded - _total_desc)
+    perc_25 = (esforco/tot_rec_base*100) if tot_rec_base>0 else 0.0
+    d.update(rp_base=tot_rec_base, rp_meta=tot_rec_base*0.25, rp_esforco=esforco, perc_25=perc_25)
+
+    mapa_desp = {'PNAE':['1552'],'PNATE':['1553'],'PTE':['1576'],'QESE':['1550']}
+    programas = ['PNAE','PNATE','PTE','QESE']
+    dvinc = df_r[df_r['Descrição da Receita'].str.upper().str.strip().isin(programas)].copy()
+    drem  = df_r[df_r['Categoria'].str.strip() == 'Remunerações Bancárias'].copy()
+    vinc = {}
+    for prog in programas:
+        dprog = dvinc[dvinc['Descrição da Receita'].str.upper().str.strip()==prog]
+        rmask = drem['Descrição da Receita'].str.upper().str.strip().str.contains(prog, na=False)
+        transf = soma(dprog, meses)
+        rend   = soma(drem[rmask], meses)
+        receita = transf + rend
+        desp    = soma(df_df[df_df['Fonte'].isin(mapa_desp[prog]) &
+                             (df_df['Tipo']=='Liquidado')], meses)
+        saldo   = receita - desp
+        saldo_perc = (saldo/receita*100) if receita>0 else 0.0
+        vinc[prog] = dict(receita=receita, despesa=desp, saldo=saldo, saldo_perc=saldo_perc)
+    d['vinc'] = vinc
+
+    liq_cols = [f"{m}_Liquidado" for m in meses if f"{m}_Liquidado" in df_f.columns]
+    CAP = ['Obras e Instalações', 'Equipamentos e Materiais Permanentes']
+    dm = df_f.copy()
+    dm['Nat'] = dm['Elemento'].apply(lambda x: 'Capital' if str(x).strip() in CAP else 'Custeio')
+    cap = dm[dm['Nat']=='Capital'][liq_cols].sum().sum()
+    cus = dm[dm['Nat']=='Custeio'][liq_cols].sum().sum()
+    tot = cap + cus
+    d.update(macro_total=tot, macro_capital=cap, macro_custeio=cus,
+             macro_perc_capital=(cap/tot*100 if tot>0 else 0),
+             macro_perc_custeio=(cus/tot*100 if tot>0 else 0))
+
+    FOLHA = list(_REL_FOLHA)
+    d['folha_total'] = df_f[df_f['Elemento'].isin(FOLHA)][liq_cols].sum().sum()
+    return d
+
+
+# Nome da Secretária(o) de Educação (opcional). Em branco, a linha NÃO aparece
+# no relatório. Para exibir, basta preencher com o nome.
+RELATORIO_SECRETARIA = ""
+
+def _pdf_relatorio(d, municipio, secretaria=None):
+    """Gera o PDF do relatório de consultoria (análise gerencial completa)."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
+                                    TableStyle, HRFlowable)
+    from reportlab.lib.enums import TA_CENTER
+
+    if secretaria is None:
+        secretaria = RELATORIO_SECRETARIA
+
+    AZUL  = colors.HexColor('#003366')
+    VERDE = colors.HexColor('#1a7a4a')
+    VERM  = colors.HexColor('#b00020')
+    LARANJA = colors.HexColor('#b9770e')
+    CINZA = colors.HexColor('#f0f2f5')
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=18*mm, rightMargin=18*mm,
+                            topMargin=16*mm, bottomMargin=16*mm,
+                            title="IG2P - Relatórios",
+                            author="iG2P — Plataforma de Gestão Pública",
+                            subject=f"Relatório Analítico e Gerencial — Educação ({municipio})")
+    ss = getSampleStyleSheet()
+    h_title = ParagraphStyle('t', parent=ss['Title'], fontSize=16, textColor=AZUL,
+                             alignment=TA_CENTER, spaceAfter=2)
+    h_sub = ParagraphStyle('s', parent=ss['Normal'], fontSize=9.5, textColor=colors.grey,
+                           alignment=TA_CENTER, spaceAfter=10)
+    h2 = ParagraphStyle('h2', parent=ss['Heading2'], fontSize=12, textColor=AZUL,
+                        spaceBefore=10, spaceAfter=4)
+    h3 = ParagraphStyle('h3', parent=ss['Heading3'], fontSize=10.5,
+                        textColor=colors.HexColor('#222'), spaceBefore=6, spaceAfter=2)
+    body = ParagraphStyle('b', parent=ss['Normal'], fontSize=9.5, leading=13)
+    a_ok = ParagraphStyle('aok', parent=body, textColor=VERDE)
+    a_bad = ParagraphStyle('abad', parent=body, textColor=VERM)
+    a_warn = ParagraphStyle('awarn', parent=body, textColor=LARANJA)
+    legal = ParagraphStyle('legal', parent=body, fontSize=8.2,
+                           textColor=colors.HexColor('#555'), leftIndent=2)
+
+    def base_legal(txt):
+        return Paragraph(f"<b>Base legal:</b> {txt}", legal)
+
+    el = []
+    el.append(Paragraph("Relatório Analítico e Gerencial — Educação", h_title))
+    el.append(Paragraph("Consultoria iG2P — Plataforma de Gestão Pública", h_sub))
+    el.append(HRFlowable(width="100%", color=AZUL, thickness=1.2, spaceAfter=8))
+
+    # 1. Informações
+    el.append(Paragraph("1. Informações da Reunião", h2))
+    hoje = datetime.now().strftime("%d/%m/%Y")
+    info = [["Município:", f"{municipio} - MG"]]
+    sec_val = secretaria.strip() if secretaria else ""
+    if sec_val:  # só exibe a linha se um nome for informado (sem linha em branco)
+        info.append(["Secretária(o) de Educação:", sec_val])
+    info.append(["Data:", hoje])
+    info.append(["Pauta Principal:", f"Análise de dados financeiros e orçamentários da "
+                                      f"Educação ({d['periodo']})."])
+    t = Table(info, colWidths=[48*mm, 122*mm])
+    t.setStyle(TableStyle([('FONTNAME',(0,0),(0,-1),'Helvetica-Bold'),
+        ('FONTSIZE',(0,0),(-1,-1),9.5),('TEXTCOLOR',(0,0),(0,-1),AZUL),
+        ('VALIGN',(0,0),(-1,-1),'TOP'),('BOTTOMPADDING',(0,0),(-1,-1),3)]))
+    el.append(t)
+
+    # 2. FUNDEB
+    el.append(Paragraph("2. FUNDEB — Receitas, Despesas e Aplicação", h2))
+    saldo = d['fundeb_saldo']
+    sit_saldo = f"{formar_real(saldo)} ({'Superávit' if saldo>=0 else 'Déficit'})"
+    el.append(_rel_tabela([
+        ["Indicador", "Valor / Situação"],
+        ["Previsão Atualizada (Quadrimestral)", formar_real(d['prev_quad'])],
+        [f"Total Receitas ({d['periodo']})", formar_real(d['fundeb_rec'])],
+        [f"  • dos quais Rendimentos de aplicação", formar_real(d['rend_fundeb'])],
+        [f"Despesas Liquidadas ({d['periodo']})", formar_real(d['fundeb_desp'])],
+        ["Saldo Quadrimestral", sit_saldo],
+    ], AZUL, CINZA))
+    p70 = d['perc_70']
+    if p70 > 100:
+        el.append(Paragraph(f"⚠ Alerta crítico: a aplicação em pessoal atingiu "
+            f"<b>{p70:.2f}%</b> ({formar_real(d['desp_70'])}) da base de cálculo, consumindo "
+            f"integralmente os recursos do período. Recomenda-se monitorar para não "
+            f"comprometer o saldo dos próximos meses.", a_bad))
+    elif p70 >= 70:
+        el.append(Paragraph(f"✔ A aplicação em pessoal atingiu <b>{p70:.2f}%</b> "
+            f"({formar_real(d['desp_70'])}), cumprindo o mínimo de 70%. O FUNDEB deve "
+            f"manter o foco no investimento da folha de pagamento dos profissionais da "
+            f"educação.", a_ok))
+    else:
+        el.append(Paragraph(f"⚠ Alerta: a aplicação em pessoal está em <b>{p70:.2f}%</b> "
+            f"({formar_real(d['desp_70'])}), <b>abaixo</b> do mínimo de 70%. É necessário "
+            f"ampliar a destinação do FUNDEB à folha dos profissionais da educação.", a_bad))
+    el.append(Paragraph(f"Ensino em Tempo Integral (ETI): a referência de 4% sobre a base de "
+        f"cálculo equivale a <b>{formar_real(d['meta_eti'])}</b>. Recomenda-se direcionar "
+        f"recursos para a estruturação do ETI, observando o levantamento de matrículas ativas.",
+        a_warn))
+    el.append(base_legal("Lei nº 14.113/2020 (FUNDEB), art. 25 (mínimo de 70% para "
+        "remuneração dos profissionais da educação) e art. 26; Lei nº 13.005/2014 (PNE) "
+        "para a estratégia de Ensino em Tempo Integral."))
+
+    # 3. Recursos Próprios 25%
+    el.append(Paragraph("3. Recursos Próprios — Aplicação Mínima (25%)", h2))
+    el.append(_rel_tabela([
+        ["Indicador", "Valor"],
+        [f"Receitas Base (Arrecadadas {d['periodo']})", formar_real(d['rp_base'])],
+        ["Meta 25%", formar_real(d['rp_meta'])],
+        ["Esforço Líquido Aplicado", formar_real(d['rp_esforco'])],
+    ], AZUL, CINZA))
+    p25 = d['perc_25']
+    if p25 < 25:
+        el.append(Paragraph(f"⚠ Alerta crítico: o índice de aplicação está em "
+            f"<b>{p25:.2f}%</b>, <b>abaixo</b> do mínimo constitucional de 25%. Recomenda-se "
+            f"reforçar a aplicação em Manutenção e Desenvolvimento do Ensino (MDE) até o "
+            f"encerramento do exercício.", a_bad))
+    else:
+        el.append(Paragraph(f"✔ O índice de aplicação está em <b>{p25:.2f}%</b>, cumprindo o "
+            f"mínimo constitucional de 25%. Estando acima da meta, a recomendação principal é "
+            f"verificar se os recursos vinculados estão sendo plenamente utilizados, cruzando "
+            f"os dados entre PNATE e PTE para otimizar o uso das fontes específicas antes do "
+            f"recurso próprio.", a_ok))
+    el.append(base_legal("Constituição Federal de 1988, art. 212 (mínimo de 25% da receita "
+        "de impostos e transferências em MDE)."))
+
+    # 4. Recursos Vinculados
+    el.append(Paragraph("4. Recursos Vinculados — Federais e Estaduais", h2))
+    tab_v = [["Programa", "Receita", "Despesa Liq.", "Saldo", "Saldo %"]]
+    for prog in ['PNAE','PNATE','PTE','QESE']:
+        v = d['vinc'][prog]
+        tab_v.append([prog, formar_real(v['receita']), formar_real(v['despesa']),
+                      formar_real(v['saldo']), f"{v['saldo_perc']:.1f}%"])
+    el.append(_rel_tabela(tab_v, AZUL, CINZA,
+                          col_widths=[24*mm,40*mm,40*mm,40*mm,26*mm]))
+
+    pnae, pnate, pte, qese = (d['vinc']['PNAE'], d['vinc']['PNATE'],
+                              d['vinc']['PTE'], d['vinc']['QESE'])
+    # PNAE
+    if pnae['saldo_perc'] > 15:
+        el.append(Paragraph(f"• <b>PNAE</b>: saldo de <b>{pnae['saldo_perc']:.1f}%</b> "
+            f"(acima de 15%) — verificar execução. Conferir ainda a aquisição da agricultura "
+            f"familiar (mínimo de 30% — Lei 11.947/2009; diretriz de gestão de 45%, priorizando "
+            f"50% de mulheres).", a_warn))
+    else:
+        el.append(Paragraph(f"• <b>PNAE</b>: saldo de {pnae['saldo_perc']:.1f}%. Conferir a "
+            f"aquisição da agricultura familiar (mínimo de 30% — Lei 11.947/2009; diretriz de "
+            f"gestão de 45%, priorizando 50% de mulheres).", body))
+    # PNATE
+    if pnate['saldo_perc'] > 30:
+        el.append(Paragraph(f"• <b>PNATE</b>: saldo de <b>{pnate['saldo_perc']:.1f}%</b> "
+            f"(acima de 30%) — avaliar a aplicação no transporte escolar e possível "
+            f"complementação via PTE.", a_warn))
+    else:
+        el.append(Paragraph(f"• <b>PNATE</b>: saldo de {pnate['saldo_perc']:.1f}%, dentro do "
+            f"parâmetro de execução do transporte escolar.", body))
+    # PTE
+    if pte['saldo'] > 0:
+        el.append(Paragraph(f"• <b>PTE</b>: há saldo não utilizado de "
+            f"<b>{formar_real(pte['saldo'])}</b> — justificar e priorizar o uso desta fonte "
+            f"estadual no transporte antes do recurso próprio.", a_warn))
+    else:
+        el.append(Paragraph(f"• <b>PTE</b>: fonte aplicada no período (sem saldo ocioso "
+            f"relevante).", body))
+    # QESE
+    el.append(Paragraph(f"• <b>QESE</b>: receita {formar_real(qese['receita'])} / despesa "
+        f"{formar_real(qese['despesa'])}. Observar se o uso está elevado enquanto o índice "
+        f"do recurso próprio (25%) permanece abaixo da meta — situação que indica "
+        f"oportunidade de melhor alocação entre as fontes.", body))
+    el.append(base_legal("PNAE — Lei nº 11.947/2009, art. 14; PNATE — Lei nº 10.880/2004; "
+        "QESE (Salário-Educação) — CF/1988, art. 212, §5º e Lei nº 9.424/1996."))
+
+    # 5. Visão Macro e Folha
+    el.append(Paragraph("5. Visão Macro e Folha de Pagamento", h2))
+    el.append(Paragraph(f"Execução orçamentária do período (Total: "
+        f"<b>{formar_real(d['macro_total'])}</b>), distribuída entre Custeio e Capital:", body))
+    el.append(_rel_tabela([
+        ["Natureza", "Valor", "Participação"],
+        ["Custeio", formar_real(d['macro_custeio']), f"{d['macro_perc_custeio']:.1f}%"],
+        ["Capital", formar_real(d['macro_capital']), f"{d['macro_perc_capital']:.1f}%"],
+    ], AZUL, CINZA, col_widths=[56*mm,57*mm,57*mm]))
+    if d['macro_custeio'] >= d['macro_capital']:
+        el.append(Paragraph(f"✔ Conforme esperado na educação, o Custeio "
+            f"({d['macro_perc_custeio']:.1f}%) supera o Capital "
+            f"({d['macro_perc_capital']:.1f}%), refletindo a natureza de manutenção da "
+            f"rede de ensino.", a_ok))
+    else:
+        el.append(Paragraph(f"⚠ Atenção: o Capital ({d['macro_perc_capital']:.1f}%) superou "
+            f"o Custeio ({d['macro_perc_custeio']:.1f}%), o que é atípico na educação e "
+            f"merece verificação.", a_warn))
+    el.append(Paragraph(f"A Folha de Pagamento ({formar_real(d['folha_total'])}) é a "
+        f"principal fonte de pressão sobre as receitas correntes do período.", body))
+
+    # 6. SIOPE x Balancete
+    el.append(Paragraph("6. SIOPE × Balancete (FUNDEB)", h2))
+    el.append(Paragraph(f"Despesa do FUNDEB 70% apurada no Balancete (painel): "
+        f"<b>{formar_real(d['desp_70'])}</b>, correspondente a um índice de aplicação de "
+        f"<b>{d['perc_70']:.2f}%</b> sobre a base de cálculo. Recomenda-se confrontar estes "
+        f"valores com o extrato do SIOPE: pequenas divergências são esperadas, mas devem ser "
+        f"justificadas e conciliadas. Atenção para que os rendimentos de aplicação "
+        f"({formar_real(d['rend_fundeb'])}) estejam considerados em ambas as bases.", body))
+    el.append(base_legal("Lei nº 14.113/2020 e Portaria STN/SOF sobre o SIOPE — Sistema de "
+        "Informações sobre Orçamentos Públicos em Educação."))
+
+    # 7. Deliberações
+    el.append(Paragraph("7. Deliberações e Próximos Passos", h2))
+    delibs = ["Levantamento do número exato de matrículas ativas no Ensino em Tempo Integral "
+              "(ETI), para embasar o enquadramento de despesas de estruturação — avaliando se é "
+              "mais estratégico alocá-las na cota de 4% do FUNDEB ETI ou em Recursos Próprios "
+              "para impulsionar o índice constitucional dos 25%.",
+              "Conciliar os valores do FUNDEB entre Balancete e SIOPE, garantindo a inclusão "
+              "dos rendimentos de aplicação financeira em ambas as bases."]
+    if d['perc_25'] < 25:
+        delibs.append("Reforçar a aplicação em Recursos Próprios (MDE) para atingir o mínimo "
+                      "constitucional de 25% até o encerramento do exercício.")
+    else:
+        delibs.append("Priorizar o uso pleno dos recursos vinculados (PNATE e PTE no "
+                      "transporte; PNAE na alimentação) antes do recurso próprio, otimizando "
+                      "as fontes específicas.")
+    if d['perc_70'] > 100:
+        delibs.append("Monitorar a aplicação em pessoal do FUNDEB, que já consome "
+                      "integralmente a receita do período.")
+    for i, dl in enumerate(delibs, 1):
+        el.append(Paragraph(f"<b>{i}.</b> {dl}", body)); el.append(Spacer(1, 2))
+
+    el.append(Spacer(1, 8))
+    el.append(HRFlowable(width="100%", color=colors.grey, thickness=0.6, spaceAfter=4))
+    el.append(Paragraph(f"Documento gerado automaticamente para uso da Secretaria de "
+        f"Educação de {municipio}-MG. Consultoria iG2P — {hoje}.",
+        ParagraphStyle('foot', parent=body, fontSize=8, textColor=colors.grey,
+                       alignment=TA_CENTER)))
+
+    doc.build(el)
+    buf.seek(0)
+    return buf.getvalue()
+
+
 df_f_raw, df_r, df_df_raw = load_all_data()
 
 def _detectar_meses(df_f, df_r, df_df):
@@ -302,6 +720,29 @@ if df_f_raw is not None and df_r is not None:
                         ("Folha de Pagamento","Folha de Pagamento")]:
         if st.sidebar.button(label, use_container_width=True):
             st.session_state.setor = key
+
+    # ── RELATÓRIO DE CONSULTORIA (gerado na hora) ─────────────────────────────
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📄 Relatório de Consultoria")
+    st.sidebar.caption("Gera um relatório financeiro do município em PDF, com os "
+                       "indicadores do período.")
+    try:
+        if '_pdf_relatorio_bytes' not in st.session_state:
+            st.session_state['_pdf_relatorio_bytes'] = _pdf_relatorio(
+                _dados_relatorio(df_f_raw, df_r, df_df_raw, meses_disponiveis),
+                "São João Batista do Glória")
+        st.sidebar.download_button(
+            "📥 Baixar Relatório (PDF)",
+            data=st.session_state['_pdf_relatorio_bytes'],
+            file_name="Relatorio_Consultoria_Sao_Joao_Batista_do_Gloria.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
+    except ModuleNotFoundError:
+        st.sidebar.info("Adicione 'reportlab' ao requirements.txt para habilitar o relatório.")
+    except Exception:
+        st.sidebar.warning("Não foi possível gerar o relatório no momento.")
+
 
     # ── FOCO NO TOPO ao trocar de setor/categoria (regra universal iG2P) ──
     _ig2p_foco = f"{st.session_state.get('setor','')}|{st.session_state.get('modo','')}"
@@ -1465,3 +1906,14 @@ if df_f_raw is not None and df_r is not None:
 
 else:
     st.error("Erro ao carregar os arquivos CSV. Verifique a pasta 'zEducação'.")
+
+
+# ── FIM DO SCRIPT: libera o loader (a página terminou de renderizar) ──────────
+if _LOGO_ESCURO or _LOGO_CLARO:
+    _html_iframe(
+        "<script>(function(){try{"
+        "var d=window.parent.document;"
+        "function done(){var l=d.querySelectorAll('.ig2p-loader');"
+        "for(var i=0;i<l.length;i++){l[i].classList.add('ig2p-done');}}"
+        "done();setTimeout(done,80);"
+        "}catch(e){}})()</script>", height=0)
