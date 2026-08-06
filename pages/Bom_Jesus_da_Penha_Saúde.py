@@ -791,6 +791,41 @@ if df_raw is not None:
         gf = dados.groupby('Fonte')['Total_Liq'].sum().reset_index().rename(columns={'Total_Liq':'Valor'})
         _pizza_por_fonte(gf, "Total Investido (Liquidado)")
 
+    def render_total_investido_fonte_mensal(
+            dados, titulo="🏥 Total Investido em Saúde — por Fonte · Acompanhamento Mensal"):
+        # Barras empilhadas por mês: mostra o comportamento dos gastos liquidados
+        # por fonte ao longo dos meses (companheiro mensal da pizza por fonte).
+        st.subheader(titulo)
+        linhas = []
+        for m in meses_disp:
+            col = f"{m}_Liq"
+            if col not in dados.columns:
+                continue
+            for fonte, val in dados.groupby('Fonte')[col].sum().items():
+                if val and abs(val) > 0.005:
+                    linhas.append({"Mês": m, "Fonte": str(fonte).strip(),
+                                   "FonteLabel": fonte_lbl(fonte), "Valor": float(val)})
+        if not linhas:
+            st.info("Sem valores mensais para exibir neste recorte.")
+            return
+        dfm = pd.DataFrame(linhas)
+        st.metric("Total Investido no Período (Liquidado)", formar_real(dfm['Valor'].sum()))
+        ordem = (dfm.groupby('FonteLabel')['Valor'].sum()
+                 .sort_values(ascending=False).index.tolist())
+        fig = px.bar(dfm, x='Mês', y='Valor', color='FonteLabel', barmode='stack',
+                     category_orders={'Mês': meses_disp, 'FonteLabel': ordem},
+                     color_discrete_map={fonte_lbl(f): cor_fonte(f)
+                                         for f in dfm['Fonte'].unique()})
+        fig.update_traces(hovertemplate=("<b>%{x} — %{data.name}</b><br>"
+                                         "Liquidado: R$ %{y:,.2f}<extra></extra>"))
+        fig.update_layout(height=470, separators=',.', barmode='stack',
+                          xaxis_title="Mês", yaxis_title="Liquidado (R$)",
+                          yaxis_tickprefix='R$ ', legend_title="Fonte",
+                          legend=dict(orientation="h", yanchor="top", y=-0.16,
+                                      xanchor="center", x=0.5, font=dict(size=12)),
+                          margin=dict(t=20, b=90))
+        st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
+
     def render_detalhamento_elemento(dados, key_prefix="cat"):
         st.markdown('<div id="foco_grafico"></div>', unsafe_allow_html=True)
         st.subheader("📦 Detalhamento por Elemento")
@@ -1153,6 +1188,10 @@ if df_raw is not None:
 
         # Total Investido em Saúde por FONTE (pizza) — item novo
         render_total_investido_fonte(df_raw, "🏥 Total Investido em Saúde — por Fonte")
+        st.markdown("---")
+
+        # Total Investido por FONTE — acompanhamento MENSAL (barras empilhadas)
+        render_total_investido_fonte_mensal(df_raw)
 
     # ══════════════════════════════════════════════════════════════════════════
     # MODO 2 — ANÁLISE POR CATEGORIA
@@ -1180,6 +1219,10 @@ if df_raw is not None:
         st.markdown("---")
 
         render_total_investido_fonte(df_cat, "🏥 Total Investido na Categoria — por Fonte")
+        st.markdown("---")
+
+        render_total_investido_fonte_mensal(
+            df_cat, "🏥 Total Investido na Categoria — por Fonte · Acompanhamento Mensal")
 
 else:
     st.error("Arquivos de dados não encontrados! Verifique a pasta 'zSaúde'.")
