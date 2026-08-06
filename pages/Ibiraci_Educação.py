@@ -473,6 +473,8 @@ def _pdf_relatorio(d, municipio, secretaria=None):
     from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
                                     TableStyle, HRFlowable)
     from reportlab.lib.enums import TA_CENTER
+    from io import BytesIO
+    from datetime import datetime
 
     if secretaria is None:
         secretaria = RELATORIO_SECRETARIA
