@@ -92,6 +92,8 @@ COR_REC = {
 COR_DESP = {
     'FUNDEB 70% – Vigente': '#4a0000',
     'FUNDEB 30% – Vigente': '#ff1744',
+    'VAAT 4% Folha – Vigente': '#7b241c',
+    'VAAT 4% – Vigente': '#e59866',
 }
 
 def limpar_valor(valor):
@@ -868,16 +870,25 @@ if df_f_raw is not None and df_r is not None:
             lambda x: 'FUNDEB 70%' if x=='15407' else 'FUNDEB 30%')
         # ETI despesas — Fonte 1546 (mostrado no gráfico mas NÃO entra na base 70%)
         df_df_fundeb_eti = df_df_raw[df_df_raw['Fonte']=='1546'].copy()
+        # VAAT 4% — despesas (154271 = geral; 154272 = folha). Só a FOLHA entra nos 70%.
+        df_df_vaat       = df_df_raw[df_df_raw['Fonte']=='154271'].copy()
+        df_df_vaat_folha = df_df_raw[df_df_raw['Fonte']=='154272'].copy()
 
         base_indice_70  = soma(df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
                                 ['Principal','Rendimentos','VAAT'])], meses_disponiveis)
+        # Folha do VAAT (154272) entra no 70%; VAAT geral (154271) NÃO entra.
+        desp_vaat_folha  = soma(df_df_vaat_folha[df_df_vaat_folha['Tipo']=='Liquidado'],
+                                meses_disponiveis)
+        desp_vaat_geral  = soma(df_df_vaat[df_df_vaat['Tipo']=='Liquidado'], meses_disponiveis)
         desp_70_vigente = soma(df_df_fundeb[(df_df_fundeb['Fonte']=='15407') &
-                                (df_df_fundeb['Tipo']=='Liquidado')], meses_disponiveis)
+                                (df_df_fundeb['Tipo']=='Liquidado')], meses_disponiveis) \
+                          + desp_vaat_folha
         desp_30_vigente = soma(df_df_fundeb[(df_df_fundeb['Fonte']=='15403') &
                                 (df_df_fundeb['Tipo']=='Liquidado')], meses_disponiveis)
         desp_eti_vigente = soma(df_df_fundeb_eti[df_df_fundeb_eti['Tipo']=='Liquidado'],
                                 meses_disponiveis)
-        tot_desp_vigente = desp_70_vigente + desp_30_vigente + desp_eti_vigente
+        tot_desp_vigente = (desp_70_vigente + desp_30_vigente + desp_eti_vigente
+                            + desp_vaat_geral)
         perc_70_indice   = (desp_70_vigente/base_indice_70*100) if base_indice_70>0 else 0.0
 
         # CORREÇÃO 1: novo padrão 3 colunas
@@ -919,7 +930,7 @@ if df_f_raw is not None and df_r is not None:
         t1, t2, t3 = st.columns(3)
         with t1: st.metric(f"Total Receitas ({meses_disponiveis[0]}–{meses_disponiveis[-1]})",
                             formar_real(tot_rec_periodo))
-        with t2: st.metric("Total Despesas Liquidadas – Ano Vigente (70%+30%+ETI)",
+        with t2: st.metric("Total Despesas Liquidadas – Ano Vigente (70%+30%+ETI+VAAT)",
                             formar_real(tot_desp_vigente))
         with t3:
             delta_val = exec_perc if saldo >= 0 else -exec_perc
@@ -936,7 +947,9 @@ if df_f_raw is not None and df_r is not None:
             for m in meses_disponiveis:
                 tot_rec_m  = soma(df_r_fundeb, [m])
                 tot_desp_m = (soma(df_df_fundeb[df_df_fundeb['Tipo']=='Liquidado'], [m]) +
-                              soma(df_df_fundeb_eti[df_df_fundeb_eti['Tipo']=='Liquidado'], [m]))
+                              soma(df_df_fundeb_eti[df_df_fundeb_eti['Tipo']=='Liquidado'], [m]) +
+                              soma(df_df_vaat[df_df_vaat['Tipo']=='Liquidado'], [m]) +
+                              soma(df_df_vaat_folha[df_df_vaat_folha['Tipo']=='Liquidado'], [m]))
                 for cat in categorias_rec:
                     val = soma(df_r_fundeb[df_r_fundeb['Subcategoria']==cat], [m])
                     if val == 0: continue
@@ -967,6 +980,8 @@ if df_f_raw is not None and df_r is not None:
                     ('15407', 'FUNDEB 70% – Vigente', df_df_fundeb),
                     ('15403', 'FUNDEB 30% – Vigente', df_df_fundeb),
                     ('1546',  'ETI – Vigente',         df_df_fundeb_eti),
+                    ('154272','VAAT 4% Folha – Vigente', df_df_vaat_folha),
+                    ('154271','VAAT 4% – Vigente',       df_df_vaat),
                 ]:
                     if fonte_cod == '1546':
                         val = soma(df_src[df_src['Tipo']=='Liquidado'], [m])
@@ -1024,6 +1039,8 @@ if df_f_raw is not None and df_r is not None:
                 ('15407', 'FUNDEB 70% – Vigente', df_df_fundeb),
                 ('15403', 'FUNDEB 30% – Vigente', df_df_fundeb),
                 ('1546',  'ETI – Vigente',         df_df_fundeb_eti),
+                ('154272','VAAT 4% Folha – Vigente', df_df_vaat_folha),
+                ('154271','VAAT 4% – Vigente',       df_df_vaat),
             ]:
                 if fonte_cod == '1546':
                     val = soma(df_src[df_src['Tipo']=='Liquidado'], meses_disponiveis)

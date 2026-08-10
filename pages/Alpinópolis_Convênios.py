@@ -2,8 +2,6 @@
 """
 iG2P · Convênios & Emendas — Dashboard por Município
 Fonte de dados: Google Sheets API (planilha "Emendas - <Município>").
-As abas da planilha têm exatamente os nomes usados em ABAS abaixo.
-Para desenvolvimento local, cai automaticamente em CSVs na pasta zConvenios/.
 """
 
 import os
