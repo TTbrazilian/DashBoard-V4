@@ -958,9 +958,9 @@ if df_f_raw is not None and df_r is not None:
         desp_vaat_folha  = soma(df_df_vaat_folha[df_df_vaat_folha['Tipo']=='Liquidado'],
                                 meses_disponiveis)
         desp_vaat_geral  = soma(df_df_vaat[df_df_vaat['Tipo']=='Liquidado'], meses_disponiveis)
-        desp_70_vigente = soma(df_df_fundeb[(df_df_fundeb['Fonte']=='15407') &
-                                (df_df_fundeb['Tipo']=='Liquidado')], meses_disponiveis) \
-                          + desp_vaat_folha
+        desp_15407 = soma(df_df_fundeb[(df_df_fundeb['Fonte']=='15407') &
+                          (df_df_fundeb['Tipo']=='Liquidado')], meses_disponiveis)
+        desp_70_vigente = desp_15407 + desp_vaat_folha   # composição do 70%: 15407 + VAAT Folha
         desp_30_vigente = soma(df_df_fundeb[(df_df_fundeb['Fonte']=='15403') &
                                 (df_df_fundeb['Tipo']=='Liquidado')], meses_disponiveis)
         desp_eti_vigente = soma(df_df_fundeb_eti[df_df_fundeb_eti['Tipo']=='Liquidado'],
@@ -1178,22 +1178,32 @@ if df_f_raw is not None and df_r is not None:
                                "Principal + Rendimentos + VAAT<br>"
                                "Valor: <b>"+formar_real(base_indice_70)+"</b></span><extra></extra>"),
             ))
+            # Composição do 70%: FUNDEB 70% (15407) + VAAT 4% Folha (154272), empilhados
             fig_70.add_trace(go.Bar(
-                x=["Despesas 70%\n(Liquidado)"], y=[desp_70_vigente],
-                name=f"Despesas 70% — {perc_70_indice:.2f}%",
+                x=["Despesas 70%\n(Liquidado)"], y=[desp_15407],
+                name="FUNDEB 70% (15407)",
                 marker_color=COR_DESP['FUNDEB 70% – Vigente'],
-                text=[f"{formar_real(desp_70_vigente)}\n({perc_70_indice:.2f}%)"],
-                textposition='inside', insidetextanchor='middle',
-                hovertemplate=("<span style='color:white;'><b>Despesas FUNDEB 70%</b><br>"
-                               "Fonte: 15407 | Liquidado<br>"
-                               "Valor: <b>"+formar_real(desp_70_vigente)+"</b><br>"
-                               "Índice: <b>"+f"{perc_70_indice:.2f}%"+"</b></span><extra></extra>"),
+                text=[formar_real(desp_15407)], textposition='inside', insidetextanchor='middle',
+                hovertemplate=("<span style='color:white;'><b>FUNDEB 70% — Fonte 15407</b><br>"
+                               "Liquidado: <b>"+formar_real(desp_15407)+"</b></span><extra></extra>"),
             ))
+            fig_70.add_trace(go.Bar(
+                x=["Despesas 70%\n(Liquidado)"], y=[desp_vaat_folha],
+                name="VAAT 4% Folha (154272)",
+                marker_color=COR_DESP['VAAT 4% Folha – Vigente'],
+                text=[formar_real(desp_vaat_folha)], textposition='inside', insidetextanchor='middle',
+                hovertemplate=("<span style='color:white;'><b>VAAT 4% Folha — Fonte 154272</b><br>"
+                               "Liquidado: <b>"+formar_real(desp_vaat_folha)+"</b><br>"
+                               "Compõe o índice dos 70%</span><extra></extra>"),
+            ))
+            fig_70.add_annotation(x="Despesas 70%\n(Liquidado)", y=desp_70_vigente,
+                text=f"<b>{formar_real(desp_70_vigente)}</b> ({perc_70_indice:.2f}%)",
+                showarrow=False, yshift=14, font=dict(size=13, color="#333"))
             fig_70.add_hline(y=base_indice_70*0.70, line_dash="dot", line_color="green",
                              annotation_text=f"Meta 70% = {formar_real(base_indice_70*0.70)}",
                              annotation_position="top left")
             fig_70.update_layout(
-                separators=",.", barmode='group', hoverlabel=HOVER_STYLE,
+                separators=",.", barmode='stack', hoverlabel=HOVER_STYLE,
                 yaxis=dict(showticklabels=False), showlegend=True,
                 legend=dict(orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5),
                 height=440, margin=dict(b=80),
@@ -1201,25 +1211,22 @@ if df_f_raw is not None and df_r is not None:
         else:
             dados_70_m = []
             for m in meses_disponiveis:
-                base_m   = soma(df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
-                                    ['Principal','Rendimentos','VAAT'])], [m])
-                liq_70_m = soma(df_df_fundeb[(df_df_fundeb['Fonte']=='15407') &
-                                             (df_df_fundeb['Tipo']=='Liquidado')], [m])
-                perc_m   = (liq_70_m/base_m*100) if base_m>0 else 0.0
-                dados_70_m += [
-                    {"Mês":m,"Tipo":"Receita Base","Valor":base_m,"Texto":""},
-                    {"Mês":m,"Tipo":"FUNDEB 70% (Liquidado)","Valor":liq_70_m,
-                     "Texto":f"{perc_m:.1f}%"},
-                ]
-            fig_70 = px.bar(
-                pd.DataFrame(dados_70_m), x='Mês', y='Valor', color='Tipo',
-                barmode='group', text='Texto',
-                color_discrete_map={
-                    "Receita Base":           "#003366",
-                    "FUNDEB 70% (Liquidado)": COR_DESP['FUNDEB 70% – Vigente'],
-                },
-                category_orders={"Mês":ORDEM_MESES}
-            )
+                base_m = soma(df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
+                                  ['Principal','Rendimentos','VAAT'])], [m])
+                v15407 = soma(df_df_fundeb[(df_df_fundeb['Fonte']=='15407') &
+                                           (df_df_fundeb['Tipo']=='Liquidado')], [m])
+                vfolha = soma(df_df_vaat_folha[df_df_vaat_folha['Tipo']=='Liquidado'], [m])
+                dados_70_m.append({"Mês": m, "base": base_m, "v15407": v15407, "vfolha": vfolha})
+            _d70 = pd.DataFrame(dados_70_m)
+            # Receita (offsetgroup 'rec') × Despesa 70% empilhada 15407+154272 (offsetgroup 'desp')
+            fig_70 = go.Figure()
+            fig_70.add_bar(x=_d70['Mês'], y=_d70['base'], name="Receita Base",
+                           marker_color="#003366", offsetgroup='rec')
+            fig_70.add_bar(x=_d70['Mês'], y=_d70['v15407'], name="FUNDEB 70% (15407)",
+                           marker_color=COR_DESP['FUNDEB 70% – Vigente'], offsetgroup='desp')
+            fig_70.add_bar(x=_d70['Mês'], y=_d70['vfolha'], name="VAAT 4% Folha (154272)",
+                           marker_color=COR_DESP['VAAT 4% Folha – Vigente'], offsetgroup='desp')
+            fig_70.update_layout(barmode='stack')
             df_meta_70 = pd.DataFrame([
                 {"Mês":m, "Meta 70%": soma(df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
                     ['Principal','Rendimentos','VAAT'])],[m])*0.70}
@@ -1371,7 +1378,7 @@ if df_f_raw is not None and df_r is not None:
         _desconto_superavit_ant   = 147_388.98
         _total_descontos_25       = _desconto_fundeb_nao_util + _desconto_superavit_ant
 
-        total_desp_15001 = df_df_15001[meses_disponiveis].sum().sum()
+        total_desp_15001 = obter_soma_rp(df_df_15001, meses_disponiveis)
         esforco_total    = max(0.0, total_desp_15001 + tot_deducoes - _total_descontos_25)
         perc_25          = (esforco_total/tot_rec_base*100) if tot_rec_base>0 else 0.0
         saldo_nec_25     = max(0.0, meta_25_valor - esforco_total)
