@@ -2124,9 +2124,6 @@ if df_f_raw is not None and df_r is not None:
                     st.info("Nenhum programa com adesão 'Sim' encontrado na planilha.")
                 else:
                     dfa = pd.DataFrame(linhas)
-                    c1, c2 = st.columns(2)
-                    with c1: st.metric("Programas aderidos em 2026", len(dfa))
-                    with c2: st.metric("Seções contempladas", dfa['Seção'].nunique())
                     for s in dfa['Seção'].unique():
                         st.markdown(f"**{s}**")
                         st.dataframe(
