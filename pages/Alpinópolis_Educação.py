@@ -222,7 +222,7 @@ def _canoniza_meses_flat(df):
     return df.rename(columns=ren) if ren else df
 
 
-@st.cache_data
+@st.cache_data(ttl=300)
 def load_all_data():
     path_f  = buscar_arquivo("zEducação/Alpinópolis.csv")
     path_r  = buscar_arquivo("zEducação/Alpinópolis_R.csv")
@@ -713,19 +713,31 @@ if df_f_raw is not None and df_r is not None:
         if st.sidebar.button(label, use_container_width=True):
             st.session_state.setor = key
 
+    # ── ATUALIZAR DADOS (busca a última versão das planilhas) ─────────────────
+    st.sidebar.markdown("---")
+    if st.sidebar.button("🔄 Atualizar dados", use_container_width=True,
+                         help="Busca agora as últimas alterações feitas nas planilhas."):
+        st.cache_data.clear()
+        st.rerun()
+
     # ── RELATÓRIO DE CONSULTORIA (gerado na hora) ─────────────────────────────
+
     st.sidebar.markdown("---")
     st.sidebar.subheader("📄 Relatório de Consultoria")
     st.sidebar.caption("Gera um relatório financeiro do município em PDF, com os "
                        "indicadores do período.")
     try:
-        if '_pdf_relatorio_bytes' not in st.session_state:
-            st.session_state['_pdf_relatorio_bytes'] = _pdf_relatorio(
+        # regenera se trocar de município (fingerprint) OU se os dados mudarem
+        _rel_fp = "Alpinópolis|" + str(len(meses_disponiveis)) + "|" + \
+                  str(round(float(df_f_raw.select_dtypes('number').sum().sum()), 2))
+        if st.session_state.get('_pdf_rel_fp') != _rel_fp:
+            st.session_state['_pdf_rel_fp'] = _rel_fp
+            st.session_state['_pdf_rel_bytes'] = _pdf_relatorio(
                 _dados_relatorio(df_f_raw, df_r, df_df_raw, meses_disponiveis),
                 "Alpinópolis")
         st.sidebar.download_button(
             "📥 Baixar Relatório (PDF)",
-            data=st.session_state['_pdf_relatorio_bytes'],
+            data=st.session_state['_pdf_rel_bytes'],
             file_name="Relatorio_Consultoria_Alpinopolis.pdf",
             mime="application/pdf",
             use_container_width=True,
