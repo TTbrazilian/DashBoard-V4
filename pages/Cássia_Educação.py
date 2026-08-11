@@ -685,10 +685,13 @@ def _pdf_relatorio(d, municipio, secretaria=None):
 #  Fallback local p/ pré-visualizar: zEducação/Cássia_PROG.csv e zEducação/Cássia_PDDE.csv
 # ══════════════════════════════════════════════════════════════════════════════
 ACOMP_ABA = "Cássia"   # aba do município nas DUAS planilhas de acompanhamento
-# Planilha "Acompanhamentos - Programas e PDDE" (adesões dos programas):
-ACOMP_SHEET_PROGRAMAS = "1GgpB5OZfa4M50uVziGqMi12KEC6bKis2TrqpPRU54is"
-# Planilha "Escolas Acompanhamento 2026" (PDDE por escola):
-ACOMP_SHEET_ESCOLAS   = "1OhP-i6CC3nTL2tvlS8QXklgoXjLlDtjncBywpgdN8K0"
+# IDs lidos do secrets → [acompanhamentos] (com fallback nos IDs já conhecidos):
+try:
+    _acomp = dict(st.secrets.get("acompanhamentos", {}))
+except Exception:
+    _acomp = {}
+ACOMP_SHEET_PROGRAMAS = _acomp.get("programas", "1GgpB5OZfa4M50uVziGqMi12KEC6bKis2TrqpPRU54is")
+ACOMP_SHEET_ESCOLAS   = _acomp.get("escolas",   "1OhP-i6CC3nTL2tvlS8QXklgoXjLlDtjncBywpgdN8K0")
 _ACOMP_SECOES = {'SIMEC', 'PROGRAMAS SEB', 'PDDE EQUIDADE', 'PNLD',
                  'RECOMPOSIÇÃO DAS APRENDIZAGENS'}
 
