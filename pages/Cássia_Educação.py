@@ -704,7 +704,7 @@ def _parse_pdde_escolas(raw):
     for _, r in raw.iterrows():
         c0 = str(r.iloc[0]).strip()
         c1 = str(r.iloc[1]).strip() if raw.shape[1] > 1 else ""
-        if c1.lower() == "previstos":
+        if c1.lower().startswith("previsto"):
             nome = c0.strip('*').strip()
             cur = None if nome.lower() == "escolas" else nome
             if cur:

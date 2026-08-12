@@ -304,7 +304,7 @@ if _LOGO_ESCURO or _LOGO_CLARO:
 #  _REL_FOLHA   : elementos de folha (mesma lista do gráfico "Folha de Pagamento").
 #  Fontes assumidas: próprios=15001 · FUNDEB 70%=15407 · FUNDEB 30%=15403.
 # ══════════════════════════════════════════════════════════════════════════════
-_REL_DESC_25 = 872441.82
+_REL_DESC_25 = 532417.10
 _REL_FOLHA = [
             'Vencimentos e Vantagens Fixas - Pessoal Civil',
             'Obrigações Patronais',
@@ -661,6 +661,71 @@ def _pdf_relatorio(d, municipio, secretaria=None):
     return buf.getvalue()
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# PROGRAMAS E PDDE — planilha SEPARADA de Acompanhamentos (consumo via API)
+#  IMPORTANTE: a conta de serviço precisa ter ACESSO DE LEITOR às duas planilhas.
+#  Fallback local p/ pré-visualizar: zEducação/Delfinópolis_PROG.csv e zEducação/Delfinópolis_PDDE.csv
+# ══════════════════════════════════════════════════════════════════════════════
+ACOMP_ABA = "Delfinópolis"   # aba do município nas DUAS planilhas de acompanhamento
+# IDs lidos do secrets → [acompanhamentos] (com fallback nos IDs já conhecidos):
+try:
+    _acomp = dict(st.secrets.get("acompanhamentos", {}))
+except Exception:
+    _acomp = {}
+ACOMP_SHEET_PROGRAMAS = _acomp.get("programas", "1GgpB5OZfa4M50uVziGqMi12KEC6bKis2TrqpPRU54is")
+ACOMP_SHEET_ESCOLAS   = _acomp.get("escolas",   "1OhP-i6CC3nTL2tvlS8QXklgoXjLlDtjncBywpgdN8K0")
+_ACOMP_SECOES = {'SIMEC', 'PROGRAMAS SEB', 'PDDE EQUIDADE', 'PNLD',
+                 'RECOMPOSIÇÃO DAS APRENDIZAGENS'}
+
+
+def _parse_pdde_escolas(raw):
+    """Lê o layout livre da aba de Escolas (blocos por escola) e devolve
+    {escola: {'programas': [(prog, previsto, recebido)], 'prev': x, 'rec': y}}."""
+    raw = raw.fillna("")
+    escolas = {}; cur = None
+    for _, r in raw.iterrows():
+        c0 = str(r.iloc[0]).strip()
+        c1 = str(r.iloc[1]).strip() if raw.shape[1] > 1 else ""
+        if c1.lower().startswith("previsto"):
+            nome = c0.strip('*').strip()
+            cur = None if nome.lower() == "escolas" else nome
+            if cur:
+                escolas[cur] = {"programas": [], "prev": 0.0, "rec": 0.0}
+            continue
+        if cur is None:
+            continue
+        if c0.lower().startswith("total recebido"):
+            escolas[cur]["prev"] = limpar_valor(r.iloc[1])
+            escolas[cur]["rec"]  = limpar_valor(r.iloc[2]) if raw.shape[1] > 2 else 0.0
+            cur = None
+            continue
+        if c0 and not c0.lower().startswith("saldo"):
+            pv = limpar_valor(r.iloc[1])
+            rc = limpar_valor(r.iloc[2]) if raw.shape[1] > 2 else 0.0
+            if pv > 0 or rc > 0:
+                escolas[cur]["programas"].append((c0, pv, rc))
+    return escolas
+
+
+@st.cache_data(ttl=300)
+def load_acompanhamentos():
+    df_prog = df_esc = None
+    try:                                    # Programas — aba do município, cabeçalho na 2ª linha
+        df_prog = _fonte(ACOMP_SHEET_PROGRAMAS, ACOMP_ABA,
+                         buscar_arquivo("zEducação/Delfinópolis_PROG.csv"),
+                         sep=None, engine='python', encoding='utf-8', header=1)
+        df_prog.columns = [str(c).strip() for c in df_prog.columns]
+    except Exception:
+        df_prog = None
+    try:                                    # Escolas/PDDE — layout livre (sem cabeçalho fixo)
+        df_esc = _fonte(ACOMP_SHEET_ESCOLAS, ACOMP_ABA,
+                        buscar_arquivo("zEducação/Delfinópolis_PDDE.csv"),
+                        sep=None, engine='python', encoding='utf-8', header=None, dtype=str)
+    except Exception:
+        df_esc = None
+    return df_prog, df_esc
+
+
 df_f_raw, df_r, df_df_raw = load_all_data()
 
 def _detectar_meses(df_f, df_r, df_df):
@@ -690,7 +755,8 @@ if df_f_raw is not None and df_r is not None:
                         ("Recursos Próprios","Recursos Próprios"),
                         ("Recursos Vinculados","Recursos Vinculados"),
                         ("Visão Macro","Visão Macro"),
-                        ("Folha de Pagamento","Folha de Pagamento")]:
+                        ("Folha de Pagamento","Folha de Pagamento"),
+                        ("Programas e PDDE","Programas e PDDE")]:
         if st.sidebar.button(label, use_container_width=True):
             st.session_state.setor = key
 
@@ -1247,8 +1313,8 @@ if df_f_raw is not None and df_r is not None:
             df_df_raw['Fonte'].isin(['15001']) &
             (df_df_raw['Tipo']==fase_despesa)].copy()
 
-        _desconto_fundeb_nao_util = 872_441.82
-        _desconto_superavit_ant   = 0.0
+        _desconto_fundeb_nao_util = 327_498.09
+        _desconto_superavit_ant   = 204_919.01
         _total_descontos_25       = _desconto_fundeb_nao_util + _desconto_superavit_ant
 
         total_desp_15001 = df_df_15001[meses_disponiveis].sum().sum()
@@ -1944,6 +2010,96 @@ if df_f_raw is not None and df_r is not None:
             height=400,
         )
         st.plotly_chart(fig_folha_mensal, use_container_width=True, config=CONFIG_PT)
+
+    elif st.session_state.setor == 'Programas e PDDE':
+        st.markdown("<h1 style='text-align:left;'>🎓 Delfinópolis — Programas e PDDE</h1>",
+                    unsafe_allow_html=True)
+        df_prog, df_esc = load_acompanhamentos()
+
+        # ── PROGRAMAS: apenas os com adesão em 2026 ───────────────────────────
+        st.subheader("📋 Programas — Adesões em 2026")
+        if df_prog is None or df_prog.empty:
+            st.info("Configure a planilha de Acompanhamentos (aba de Programas) para exibir as "
+                    "adesões — ou coloque o arquivo em zEducação/Delfinópolis_PROG.csv.")
+        else:
+            _cn = next((c for c in df_prog.columns if 'PROGRAMAS' in str(c).upper()), None)
+            _ca = next((c for c in df_prog.columns if str(c).strip() in ('Delfinópolis', 'Delfinopolis')), None)
+            _cc = next((c for c in df_prog.columns
+                        if 'COORDENAD' in str(c).upper() or 'ARTICUL' in str(c).upper()), None)
+            _cb = next((c for c in df_prog.columns if str(c).strip().upper() == 'BOLSA'), None)
+            if not _cn or not _ca:
+                st.warning("Não encontrei as colunas 'PROGRAMAS PARA ADESÃO' e 'Delfinópolis' na planilha.")
+            else:
+                sec = "(Geral)"; linhas = []
+                for _, r in df_prog.iterrows():
+                    nome = str(r[_cn]).strip()
+                    ades = str(r[_ca]).strip() if pd.notna(r[_ca]) else ""
+                    if not nome or nome.lower() == 'nan':
+                        continue
+                    vazio = ades == "" or ades.lower() == "nan"
+                    if vazio and (nome.upper() in _ACOMP_SECOES or 'ADESÃO' in nome.upper()
+                                  or nome.upper() == 'PNLD'):
+                        sec = nome; continue          # cabeçalho de seção
+                    if vazio:
+                        continue                       # programa sem decisão — ignora
+                    if ades.lower() == 'sim':
+                        coord = str(r[_cc]).strip() if _cc and pd.notna(r[_cc]) else ""
+                        bolsa = str(r[_cb]).strip() if _cb and pd.notna(r[_cb]) else ""
+                        linhas.append({"Seção": sec, "Programa": nome,
+                                       "Coordenador/Articulador": "" if coord in ('-', 'nan') else coord,
+                                       "Bolsa": "Sim" if bolsa.lower() == 'sim' else "—"})
+                if not linhas:
+                    st.info("Nenhum programa com adesão 'Sim' encontrado na planilha.")
+                else:
+                    dfa = pd.DataFrame(linhas)
+                    for s in dfa['Seção'].unique():
+                        st.markdown(f"**{s}**")
+                        st.dataframe(
+                            dfa[dfa['Seção'] == s][["Programa", "Coordenador/Articulador", "Bolsa"]],
+                            use_container_width=True, hide_index=True)
+        st.markdown("---")
+
+        # ── PDDE: previsão 2026 por escola ────────────────────────────────────
+        st.subheader("🏫 Recursos PDDE — Previsão 2026 por Escola")
+        _esc = _parse_pdde_escolas(df_esc) if df_esc is not None and not df_esc.empty else {}
+        if not _esc:
+            st.info("Não consegui ler a relação do PDDE por escola. Verifique se a conta de serviço "
+                    "tem acesso à planilha 'Escolas Acompanhamento 2026' (aba Delfinópolis), ou o arquivo "
+                    "local zEducação/Delfinópolis_PDDE.csv.")
+        else:
+            _res = pd.DataFrame([{"Escola": e, "Previsto 2026": d["prev"], "Recebido": d["rec"]}
+                                 for e, d in _esc.items()])
+            _mp1, _mp2, _mp3 = st.columns(3)
+            with _mp1: st.metric("Escolas", len(_res))
+            with _mp2: st.metric("Total Previsto 2026", formar_real(_res["Previsto 2026"].sum()))
+            with _mp3: st.metric("Total Recebido", formar_real(_res["Recebido"].sum()))
+            fig_pdde = px.bar(_res.sort_values("Previsto 2026"), x="Previsto 2026", y="Escola",
+                              orientation='h', color_discrete_sequence=['#1a7a4a'],
+                              text="Previsto 2026")
+            fig_pdde.update_traces(texttemplate="R$ %{x:,.0f}", cliponaxis=False,
+                                   hovertemplate="<b>%{y}</b><br>Previsto 2026: R$ %{x:,.2f}<extra></extra>")
+            fig_pdde.update_layout(height=max(340, 48 * len(_res)), separators=',.',
+                                   xaxis_tickprefix='R$ ', xaxis_title="Previsto 2026",
+                                   yaxis_title="", margin=dict(l=10, r=40, t=20, b=20))
+            st.plotly_chart(fig_pdde, use_container_width=True, config=CONFIG_PT)
+
+            st.markdown("**Detalhamento por escola (programa · previsto · recebido):**")
+            for e, d in _esc.items():
+                if not d["programas"]:
+                    continue
+                with st.expander(f"{e}  —  Previsto {formar_real(d['prev'])} · "
+                                 f"Recebido {formar_real(d['rec'])}"):
+                    _det = pd.DataFrame(d["programas"], columns=["Programa", "Previsto", "Recebido"])
+                    _det["Previsto"] = _det["Previsto"].apply(formar_real)
+                    _det["Recebido"] = _det["Recebido"].apply(formar_real)
+                    st.dataframe(_det, use_container_width=True, hide_index=True)
+
+            _rt = _res.copy()
+            _rt["Previsto 2026"] = _rt["Previsto 2026"].apply(formar_real)
+            _rt["Recebido"] = _rt["Recebido"].apply(formar_real)
+            st.dataframe(_rt, use_container_width=True, hide_index=True)
+        st.markdown("---")
+
 
     st.markdown("### 📋 Relatório Geral de Fichas")
     df_f_filt = df_f_raw[df_f_raw['Atividade'].str.contains(
