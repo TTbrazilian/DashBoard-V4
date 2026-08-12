@@ -214,7 +214,7 @@ def _fonte(sid, aba, path_local, **kwargs):
     return pd.read_csv(path_local, **kwargs)
 
 
-@st.cache_data
+@st.cache_data(ttl=300)
 def load_data():
     diretorio_atual = os.path.dirname(os.path.abspath(__file__))
 
@@ -586,6 +586,13 @@ if df_raw is not None:
 
     if 'modo' not in st.session_state:
         st.session_state.modo = 'Visão Macro'
+
+    # ── ATUALIZAR DADOS (busca a última versão das planilhas) ─────────────────
+    st.sidebar.markdown("---")
+    if st.sidebar.button("🔄 Atualizar dados", use_container_width=True,
+                         help="Busca agora as últimas alterações feitas nas planilhas."):
+        st.cache_data.clear()
+        st.rerun()
 
     st.sidebar.header("🧭 Navegação")
     if st.sidebar.button("🌐 Visão Macro", use_container_width=True,
