@@ -416,8 +416,9 @@ def _dados_relatorio(df_f, df_r, df_df, meses):
              macro_perc_capital=(cap/tot*100 if tot>0 else 0),
              macro_perc_custeio=(cus/tot*100 if tot>0 else 0))
 
-    FOLHA = list(_REL_FOLHA)
-    d['folha_total'] = df_f[df_f['Elemento'].isin(FOLHA)][liq_cols].sum().sum()
+    _FOLHA_UP = {str(e).strip().upper() for e in _REL_FOLHA}   # casa sem depender de maiús/minús
+    d['folha_total'] = df_f[df_f['Elemento'].astype(str).str.strip().str.upper()
+                            .isin(_FOLHA_UP)][liq_cols].sum().sum()
     return d
 
 
@@ -1873,7 +1874,9 @@ if df_f_raw is not None and df_r is not None:
         liq_cols_f = [f"{m}_Liquidado" for m in meses_disponiveis
                       if f"{m}_Liquidado" in df_f_raw.columns]
 
-        df_folha = df_f_raw[df_f_raw['Elemento'].isin(FOLHA_ELEMENTOS)].copy()
+        _folha_up = {str(e).strip().upper() for e in FOLHA_ELEMENTOS}
+        df_folha = df_f_raw[df_f_raw['Elemento'].astype(str).str.strip().str.upper()
+                            .isin(_folha_up)].copy()
 
         # REGRA UNIVERSAL: fontes separadas individualmente
         def origem_fonte(f):
