@@ -711,11 +711,17 @@ def _parse_pdde_escolas(raw):
 @st.cache_data(ttl=300)
 def load_acompanhamentos():
     df_prog = df_esc = None
-    try:                                    # Programas — aba do município, cabeçalho na 2ª linha
-        df_prog = _fonte(ACOMP_SHEET_PROGRAMAS, ACOMP_ABA,
-                         buscar_arquivo("zEducação/Delfinópolis_PROG.csv"),
-                         sep=None, engine='python', encoding='utf-8', header=1)
-        df_prog.columns = [str(c).strip() for c in df_prog.columns]
+    try:                                    # Programas — detecta a linha do cabeçalho ('PROGRAMAS')
+        _rawp = _fonte(ACOMP_SHEET_PROGRAMAS, ACOMP_ABA,
+                       buscar_arquivo("zEducação/Delfinópolis_PROG.csv"),
+                       sep=None, engine='python', encoding='utf-8', header=None, dtype=str)
+        _hi = 0
+        for _k in range(min(6, len(_rawp))):
+            if _rawp.iloc[_k].astype(str).str.upper().str.contains('PROGRAMAS').any():
+                _hi = _k; break
+        df_prog = _rawp.iloc[_hi + 1:].copy()
+        df_prog.columns = [str(c).strip() for c in _rawp.iloc[_hi]]
+        df_prog = df_prog.reset_index(drop=True)
     except Exception:
         df_prog = None
     try:                                    # Escolas/PDDE — layout livre (sem cabeçalho fixo)
@@ -2026,7 +2032,8 @@ if df_f_raw is not None and df_r is not None:
                     "adesões — ou coloque o arquivo em zEducação/Delfinópolis_PROG.csv.")
         else:
             _cn = next((c for c in df_prog.columns if 'PROGRAMAS' in str(c).upper()), None)
-            _ca = next((c for c in df_prog.columns if str(c).strip() in ('Delfinópolis', 'Delfinopolis')), None)
+            _cols = list(df_prog.columns)
+            _ca = _cols[_cols.index(_cn) + 1] if (_cn in _cols and _cols.index(_cn) + 1 < len(_cols)) else None
             _cc = next((c for c in df_prog.columns
                         if 'COORDENAD' in str(c).upper() or 'ARTICUL' in str(c).upper()), None)
             _cb = next((c for c in df_prog.columns if str(c).strip().upper() == 'BOLSA'), None)
