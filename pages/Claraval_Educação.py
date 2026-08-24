@@ -103,6 +103,7 @@ FUNDEB4_FONTES = [
     ('154372', 'FUNDEB 4% VAAR (154372)',      '#f1c40f'),
 ]
 COR_DESP.update({_lb: _cor for _fc, _lb, _cor in FUNDEB4_FONTES})
+FUNDEB4_VAAR = {'154371', '154372'}   # VAAR: entra só nos 4%, NÃO no 70% (só 4% ETI)
 
 def limpar_valor(valor):
     if pd.isna(valor) or str(valor).strip() in ["","−","-","R$ 0,00","0"]:
@@ -160,11 +161,30 @@ def _conectar_sheets():
     return gspread.authorize(cred)
 
 
+def _norm_aba(s):
+    """Normaliza o título de uma aba para casamento tolerante: remove acentos,
+    caixa e espaços redundantes. Ex.: 'São João ' ≈ 'sao joao'."""
+    import unicodedata
+    s = unicodedata.normalize('NFKD', str(s)).encode('ascii', 'ignore').decode('ascii')
+    return ' '.join(s.lower().split())
+
 def _ler_aba(sheet_id, aba, **read_csv_kwargs):
     """Lê uma aba do Google Sheets com a MESMA semântica do pd.read_csv de arquivo:
     reconstrói um CSV em memória a partir das células e reutiliza o pd.read_csv,
-    preservando header=[0,1] etc. (byte-fiel ao arquivo original)."""
-    ws = _conectar_sheets().open_by_key(sheet_id).worksheet(aba)
+    preservando header=[0,1] etc. (byte-fiel ao arquivo original).
+    O nome da aba é casado de forma tolerante (acento/caixa/espaço)."""
+    sh = _conectar_sheets().open_by_key(sheet_id)
+    try:
+        ws = sh.worksheet(aba)
+    except Exception:
+        _alvo = _norm_aba(aba)
+        ws = None
+        for _w in sh.worksheets():
+            if _norm_aba(_w.title) == _alvo:
+                ws = _w
+                break
+        if ws is None:
+            raise
     buf = io.StringIO()
     csv.writer(buf).writerows(ws.get_all_values())
     buf.seek(0)
@@ -937,14 +957,16 @@ if df_f_raw is not None and df_r is not None:
 
         # Claraval: VAAT=0 → base 70% = Principal + Rendimentos (sem VAAT)
         base_indice_70  = soma(df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
-                                ['Principal','Rendimentos'])], meses_disponiveis)
+                                ['Principal','Rendimentos','VAAT'])], meses_disponiveis)
         def _desp_f(fcod, meses):
             return soma(df_df_fundeb[(df_df_fundeb['Fonte'] == fcod) &
                                      (df_df_fundeb['Tipo'] == 'Liquidado')], meses)
         desp_15407 = _desp_f('15407', meses_disponiveis)
         desp_f4 = {_f: _desp_f(_f, meses_disponiveis) for _f, _l, _c in FUNDEB4_FONTES}
-        desp_f4_total = sum(desp_f4.values())
-        desp_70_vigente = desp_15407 + desp_f4_total   # 15407 + as 6 fontes do FUNDEB 4%
+        desp_f4_70    = sum(v for k, v in desp_f4.items() if k not in FUNDEB4_VAAR)
+        desp_f4_vaar  = sum(v for k, v in desp_f4.items() if k in FUNDEB4_VAAR)
+        desp_f4_total = desp_f4_70 + desp_f4_vaar
+        desp_70_vigente = desp_15407 + desp_f4_70   # 15407 + Principal + VAAT (VAAR fora do 70%)
         desp_30_vigente = soma(df_df_fundeb[(df_df_fundeb['Fonte']=='15403') &
                                 (df_df_fundeb['Tipo']=='Liquidado')], meses_disponiveis)
         tot_desp_vigente = desp_70_vigente + desp_30_vigente
@@ -1154,6 +1176,7 @@ if df_f_raw is not None and df_r is not None:
                                "Liquidado: <b>"+formar_real(desp_15407)+"</b></span><extra></extra>"),
             ))
             for _fc, _lb, _cor in FUNDEB4_FONTES:
+                if _fc in FUNDEB4_VAAR: continue   # VAAR não entra no 70%
                 _v = desp_f4.get(_fc, 0.0)
                 fig_70.add_trace(go.Bar(
                     x=["Despesas 70%\n(Liquidado)"], y=[_v], name=_lb, marker_color=_cor,
@@ -1178,7 +1201,7 @@ if df_f_raw is not None and df_r is not None:
         else:
             _meses = meses_disponiveis
             _base_m = [soma(df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
-                            ['Principal','Rendimentos'])], [m]) for m in _meses]
+                            ['Principal','Rendimentos','VAAT'])], [m]) for m in _meses]
             fig_70 = go.Figure()
             fig_70.add_bar(x=_meses, y=_base_m, name="Receita Base",
                            marker_color="#003366", offsetgroup='rec')
@@ -1186,13 +1209,14 @@ if df_f_raw is not None and df_r is not None:
                            name="FUNDEB 70% (15407)",
                            marker_color=COR_DESP['FUNDEB 70% – Vigente'], offsetgroup='desp')
             for _fc, _lb, _cor in FUNDEB4_FONTES:
+                if _fc in FUNDEB4_VAAR: continue   # VAAR não entra no 70%
                 fig_70.add_bar(x=_meses, y=[_desp_f(_fc, [m]) for m in _meses],
                                name=_lb, marker_color=_cor, offsetgroup='desp')
             fig_70.update_layout(barmode='stack')
             # REGRA UNIVERSAL: shapes _OFFSET=0.22
             df_meta_70 = pd.DataFrame([
                 {"Mês":m, "Meta 70%": soma(df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
-                    ['Principal','Rendimentos'])],[m])*0.70}
+                    ['Principal','Rendimentos','VAAT'])],[m])*0.70}
                 for m in meses_disponiveis
             ])
             _OFFSET = 0.22

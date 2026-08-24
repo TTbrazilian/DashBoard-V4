@@ -88,7 +88,8 @@ if 'setor' not in st.session_state:
 COR_REC = {
     'Principal':   '#1a7a4a',
     'Rendimentos': '#0d47a1',
-    'VAAR/VAAT':   '#69f0ae',
+    'VAAT':        '#69f0ae',
+    'VAAR':        '#00bfa5',
     'ETI':         '#40c4ff',
 }
 COR_DESP = {
@@ -105,6 +106,7 @@ FUNDEB4_FONTES = [
     ('154372', 'FUNDEB 4% VAAR (154372)',      '#f1c40f'),
 ]
 COR_DESP.update({_lb: _cor for _fc, _lb, _cor in FUNDEB4_FONTES})
+FUNDEB4_VAAR = {'154371', '154372'}   # VAAR: entra só nos 4%, NÃO no 70% (só 4% ETI)
 
 # ── FUNÇÕES UTILITÁRIAS ───────────────────────────────────────────────────────
 def limpar_valor(valor):
@@ -171,11 +173,30 @@ def _conectar_sheets():
     return gspread.authorize(cred)
 
 
+def _norm_aba(s):
+    """Normaliza o título de uma aba para casamento tolerante: remove acentos,
+    caixa e espaços redundantes. Ex.: 'São João ' ≈ 'sao joao'."""
+    import unicodedata
+    s = unicodedata.normalize('NFKD', str(s)).encode('ascii', 'ignore').decode('ascii')
+    return ' '.join(s.lower().split())
+
 def _ler_aba(sheet_id, aba, **read_csv_kwargs):
     """Lê uma aba do Google Sheets com a MESMA semântica do pd.read_csv de arquivo:
     reconstrói um CSV em memória a partir das células e reutiliza o pd.read_csv,
-    preservando header=[0,1] etc. (byte-fiel ao arquivo original)."""
-    ws = _conectar_sheets().open_by_key(sheet_id).worksheet(aba)
+    preservando header=[0,1] etc. (byte-fiel ao arquivo original).
+    O nome da aba é casado de forma tolerante (acento/caixa/espaço)."""
+    sh = _conectar_sheets().open_by_key(sheet_id)
+    try:
+        ws = sh.worksheet(aba)
+    except Exception:
+        _alvo = _norm_aba(aba)
+        ws = None
+        for _w in sh.worksheets():
+            if _norm_aba(_w.title) == _alvo:
+                ws = _w
+                break
+        if ws is None:
+            raise
     buf = io.StringIO()
     csv.writer(buf).writerows(ws.get_all_values())
     buf.seek(0)
@@ -941,7 +962,8 @@ if df_f_raw is not None and df_r is not None:
 
         def cat_receita(desc):
             d = str(desc).upper().strip()
-            if 'VAAR' in d or 'VAAT' in d:             return 'VAAR/VAAT'
+            if 'VAAT' in d:                            return 'VAAT'
+            if 'VAAR' in d:                            return 'VAAR'
             if 'ETI'  in d or 'TEMPO INTEGRAL' in d:   return 'ETI'
             if 'APLICAÇÃO' in d or 'RENDIMENTOS' in d: return 'Rendimentos'
             return 'Principal'
@@ -963,16 +985,18 @@ if df_f_raw is not None and df_r is not None:
         df_df_fundeb['Fonte_Nome'] = df_df_fundeb['Fonte'].apply(
             lambda x: 'FUNDEB 70%' if x=='15407' else 'FUNDEB 30%')
 
-        # Base 70%: Principal + Rendimentos (sem VAAR/VAAT, sem ETI)
+        # Base 70%: Principal + Rendimentos + VAAT (VAAR entra só nos 4%; ETI fora)
         base_indice_70  = soma(df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
-                                ['Principal','Rendimentos'])], meses_disponiveis)
+                                ['Principal','Rendimentos','VAAT'])], meses_disponiveis)
         def _desp_f(fcod, meses):
             return soma(df_df_fundeb[(df_df_fundeb['Fonte'] == fcod) &
                                      (df_df_fundeb['Tipo'] == 'Liquidado')], meses)
         desp_15407 = _desp_f('15407', meses_disponiveis)
         desp_f4 = {_f: _desp_f(_f, meses_disponiveis) for _f, _l, _c in FUNDEB4_FONTES}
-        desp_f4_total = sum(desp_f4.values())
-        desp_70_vigente = desp_15407 + desp_f4_total   # 15407 + as 6 fontes do FUNDEB 4%
+        desp_f4_70    = sum(v for k, v in desp_f4.items() if k not in FUNDEB4_VAAR)
+        desp_f4_vaar  = sum(v for k, v in desp_f4.items() if k in FUNDEB4_VAAR)
+        desp_f4_total = desp_f4_70 + desp_f4_vaar
+        desp_70_vigente = desp_15407 + desp_f4_70   # 15407 + Principal + VAAT (VAAR fora do 70%)
         desp_30_vigente = soma(df_df_fundeb[(df_df_fundeb['Fonte']=='15403') &
                                 (df_df_fundeb['Tipo']=='Liquidado')], meses_disponiveis)
         tot_desp_vigente = desp_70_vigente + desp_30_vigente
@@ -1020,7 +1044,7 @@ if df_f_raw is not None and df_r is not None:
             st.metric("Saldo (Receitas − Despesas Vigentes)", formar_real(saldo),
                       delta=f"{delta_val:.1f}% Saldo", delta_color="normal")
 
-        # ── Composição das Receitas FUNDEB (Rendimentos + VAAR/VAAT + ETI) ──
+        # ── Composição das Receitas FUNDEB (Rendimentos + VAAT + VAAR + ETI) ──
         st.markdown(
             "<p style='font-size:.82rem;color:#94A3B8;margin:6px 0 4px 0'>"
             "📊 <b>Composição das Receitas FUNDEB</b> — detalhamento por subcategoria</p>",
@@ -1028,19 +1052,23 @@ if df_f_raw is not None and df_r is not None:
         )
         _val_principal = soma(df_r_fundeb[df_r_fundeb['Subcategoria']=='Principal'], meses_disponiveis)
         _val_rend      = soma(df_r_fundeb[df_r_fundeb['Subcategoria']=='Rendimentos'], meses_disponiveis)
-        _val_vaarvaat  = soma(df_r_fundeb[df_r_fundeb['Subcategoria']=='VAAR/VAAT'], meses_disponiveis)
+        _val_vaat      = soma(df_r_fundeb[df_r_fundeb['Subcategoria']=='VAAT'], meses_disponiveis)
+        _val_vaar      = soma(df_r_fundeb[df_r_fundeb['Subcategoria']=='VAAR'], meses_disponiveis)
         _val_eti       = soma(df_r_fundeb[df_r_fundeb['Subcategoria']=='ETI'], meses_disponiveis)
-        _c1, _c2, _c3, _c4 = st.columns(4)
+        _c1, _c2, _c3, _c4, _c5 = st.columns(5)
         with _c1: st.metric("Principal", formar_real(_val_principal),
                              delta=f"{_val_principal/tot_rec_periodo*100:.1f}% do total" if tot_rec_periodo>0 else "—",
                              delta_color="off")
         with _c2: st.metric("Rendimentos FUNDEB", formar_real(_val_rend),
                              delta=f"{_val_rend/tot_rec_periodo*100:.1f}% do total" if tot_rec_periodo>0 else "—",
                              delta_color="off")
-        with _c3: st.metric("VAAR / VAAT", formar_real(_val_vaarvaat),
-                             delta=f"{_val_vaarvaat/tot_rec_periodo*100:.1f}% do total" if tot_rec_periodo>0 else "—",
+        with _c3: st.metric("VAAT (entra 70% e 4%)", formar_real(_val_vaat),
+                             delta=f"{_val_vaat/tot_rec_periodo*100:.1f}% do total" if tot_rec_periodo>0 else "—",
                              delta_color="off")
-        with _c4: st.metric("ETI (Tempo Integral)", formar_real(_val_eti),
+        with _c4: st.metric("VAAR (só 4%)", formar_real(_val_vaar),
+                             delta=f"{_val_vaar/tot_rec_periodo*100:.1f}% do total" if tot_rec_periodo>0 else "—",
+                             delta_color="off")
+        with _c5: st.metric("ETI (Tempo Integral)", formar_real(_val_eti),
                              delta=f"{_val_eti/tot_rec_periodo*100:.1f}% do total" if tot_rec_periodo>0 else "—",
                              delta_color="off")
 
@@ -1188,11 +1216,12 @@ if df_f_raw is not None and df_r is not None:
 
             fig_70 = go.Figure()
             fig_70.add_trace(go.Bar(
-                x=["Receita Base\n(Principal + Rendimentos)"], y=[base_indice_70],
+                x=["Receita Base\n(Principal + Rend. + VAAT)"], y=[base_indice_70],
                 name="Receita Base", marker_color="#003366",
                 text=[formar_real(base_indice_70)],
                 textposition='inside', insidetextanchor='middle',
-                hovertemplate=("<span style='color:white;'><b>Receita Base FUNDEB</b><br>"
+                hovertemplate=("<span style='color:white;'><b>Receita Base FUNDEB (70%)</b><br>"
+                               "Principal + Rendimentos + VAAT<br>"
                                "Valor: <b>"+formar_real(base_indice_70)+"</b></span><extra></extra>"),
             ))
             fig_70.add_trace(go.Bar(
@@ -1203,6 +1232,7 @@ if df_f_raw is not None and df_r is not None:
                                "Liquidado: <b>"+formar_real(desp_15407)+"</b></span><extra></extra>"),
             ))
             for _fc, _lb, _cor in FUNDEB4_FONTES:
+                if _fc in FUNDEB4_VAAR: continue   # VAAR não entra no 70%
                 _v = desp_f4.get(_fc, 0.0)
                 fig_70.add_trace(go.Bar(
                     x=["Despesas 70%\n(Liquidado)"], y=[_v], name=_lb, marker_color=_cor,
@@ -1227,7 +1257,7 @@ if df_f_raw is not None and df_r is not None:
         else:
             _meses = meses_disponiveis
             _base_m = [soma(df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
-                            ['Principal','Rendimentos'])], [m]) for m in _meses]
+                            ['Principal','Rendimentos','VAAT'])], [m]) for m in _meses]
             fig_70 = go.Figure()
             fig_70.add_bar(x=_meses, y=_base_m, name="Receita Base",
                            marker_color="#003366", offsetgroup='rec')
@@ -1235,12 +1265,13 @@ if df_f_raw is not None and df_r is not None:
                            name="FUNDEB 70% (15407)",
                            marker_color=COR_DESP['FUNDEB 70% – Vigente'], offsetgroup='desp')
             for _fc, _lb, _cor in FUNDEB4_FONTES:
+                if _fc in FUNDEB4_VAAR: continue   # VAAR não entra no 70%
                 fig_70.add_bar(x=_meses, y=[_desp_f(_fc, [m]) for m in _meses],
                                name=_lb, marker_color=_cor, offsetgroup='desp')
             fig_70.update_layout(barmode='stack')
             df_meta_70 = pd.DataFrame([
                 {"Mês":m, "Meta 70%": soma(df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
-                    ['Principal','Rendimentos'])],[m])*0.70}
+                    ['Principal','Rendimentos','VAAT'])],[m])*0.70}
                 for m in meses_disponiveis
             ])
             # Usa shapes em vez de scatter para a linha de meta, garantindo que
@@ -1295,32 +1326,32 @@ if df_f_raw is not None and df_r is not None:
 
         # ═════════════════════════════════════════════════════════════════════
         # GRÁFICO 3 — Percentual Tempo Integral
-        # CORREÇÃO 1: base = Principal + Rendimentos + VAAR/VAAT (exclui ETI)
+        # CORREÇÃO 1: base = Principal + Rendimentos + VAAT + VAAR (exclui ETI)
         # ═════════════════════════════════════════════════════════════════════
         st.subheader("🔹 3. Percentual Tempo Integral")
 
         meta_eti_perc = 4.0
-        # Base ETI: Principal + Rendimentos + VAAR/VAAT — ETI NÃO entra na base
+        # Base ETI (4%): Principal + Rendimentos + VAAT + VAAR — ETI NÃO entra na base
         _base_eti = soma(
-            df_r_fundeb[df_r_fundeb['Subcategoria'].isin(['Principal','Rendimentos','VAAR/VAAT'])],
+            df_r_fundeb[df_r_fundeb['Subcategoria'].isin(['Principal','Rendimentos','VAAT','VAAR'])],
             meses_disponiveis
         )
         val_meta_eti = _base_eti * (meta_eti_perc/100)
 
         e1, e2 = st.columns(2)
-        with e1: st.metric("Base para Cálculo ETI (Principal + Rendimentos + VAAR/VAAT)",
+        with e1: st.metric("Base para Cálculo ETI (Principal + Rendimentos + VAAT + VAAR)",
                             formar_real(_base_eti))
         with e2: st.metric(f"Equivalente a {meta_eti_perc:.0f}% da Receita Base",
                             formar_real(val_meta_eti))
 
         fig_eti = go.Figure()
         fig_eti.add_trace(go.Bar(
-            x=["Base ETI\n(Principal + Rend. + VAAR/VAAT)"], y=[_base_eti],
+            x=["Base ETI\n(Principal + Rend. + VAAT + VAAR)"], y=[_base_eti],
             name="Base ETI", marker_color="#003366",
             text=[formar_real(_base_eti)],
             textposition='inside', insidetextanchor='middle',
             hovertemplate=("<span style='color:white;'><b>Base de Cálculo ETI</b><br>"
-                           "Principal + Rendimentos + VAAR/VAAT<br>"
+                           "Principal + Rendimentos + VAAT + VAAR<br>"
                            "(ETI não entra na base de cálculo)<br>"
                            "Valor: <b>"+formar_real(_base_eti)+"</b></span><extra></extra>"),
         ))
