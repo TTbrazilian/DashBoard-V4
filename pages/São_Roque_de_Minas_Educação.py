@@ -131,6 +131,21 @@ def buscar_arquivo(nome):
                 os.path.join(os.path.dirname(__file__),"..",nome)]
     for p in caminhos:
         if os.path.exists(p): return p
+    # Fallback tolerante: acha o arquivo ignorando acento/caixa/espaço no nome
+    import unicodedata
+    def _nz(x):
+        x = unicodedata.normalize('NFKD', str(x)).encode('ascii', 'ignore').decode('ascii')
+        return ''.join(x.lower().split())
+    alvo = _nz(os.path.basename(nome)); subdir = os.path.dirname(nome)
+    bases = ['.', '..', os.path.join(os.path.dirname(__file__), '..')]
+    for base in bases:
+        d = os.path.join(base, subdir) if subdir else base
+        try:
+            for arq in os.listdir(d):
+                if _nz(arq) == alvo:
+                    return os.path.join(d, arq)
+        except Exception:
+            pass
     return None
 
 def soma(df, cols):
@@ -169,27 +184,61 @@ def _norm_aba(s):
     s = unicodedata.normalize('NFKD', str(s)).encode('ascii', 'ignore').decode('ascii')
     return ' '.join(s.lower().split())
 
-def _ler_aba(sheet_id, aba, **read_csv_kwargs):
-    """Lê uma aba do Google Sheets com a MESMA semântica do pd.read_csv de arquivo:
-    reconstrói um CSV em memória a partir das células e reutiliza o pd.read_csv,
-    preservando header=[0,1] etc. (byte-fiel ao arquivo original).
-    O nome da aba é casado de forma tolerante (acento/caixa/espaço)."""
-    sh = _conectar_sheets().open_by_key(sheet_id)
+def _gs_call(fn, tentativas=4, espera=1.0):
+    """Chamada à API do Google Sheets com retry/backoff para erros transitórios
+    (429 rate-limit, 5xx, timeout). Erros definitivos (acesso negado, aba ausente)
+    são relançados imediatamente, sem retry."""
+    import time
+    _ult = None
+    for _i in range(tentativas):
+        try:
+            return fn()
+        except Exception as _e:
+            _ult = _e
+            _m = str(_e).lower()
+            _transit = any(t in _m for t in ('429', 'quota', 'rate limit', 'ratelimit',
+                                             'resource has been exhausted', '500', '502',
+                                             '503', 'internal error', 'backend',
+                                             'temporarily', 'timeout', 'timed out',
+                                             'deadline', 'connection'))
+            if _i < tentativas - 1 and _transit:
+                time.sleep(espera * (2 ** _i))
+                continue
+            raise
+    if _ult:
+        raise _ult
+
+def _abrir_ws(sheet_id, aba):
+    """Abre a worksheet casando o nome de forma tolerante (acento/caixa/espaço),
+    com retry para erros transitórios da API."""
+    sh = _gs_call(lambda: _conectar_sheets().open_by_key(sheet_id))
     try:
-        ws = sh.worksheet(aba)
+        return _gs_call(lambda: sh.worksheet(aba))
     except Exception:
         _alvo = _norm_aba(aba)
-        ws = None
-        for _w in sh.worksheets():
+        for _w in _gs_call(lambda: sh.worksheets()):
             if _norm_aba(_w.title) == _alvo:
-                ws = _w
-                break
-        if ws is None:
-            raise
+                return _w
+        raise KeyError("aba '%s' nao encontrada na planilha" % aba)
+
+def _ler_aba(sheet_id, aba, **read_csv_kwargs):
+    """Lê uma aba reconstruindo um CSV em memória e reutilizando pd.read_csv
+    (preserva header=[0,1] etc.). Casa o nome da aba de forma tolerante e usa
+    retry para erros transitórios."""
+    ws = _abrir_ws(sheet_id, aba)
+    vals = _gs_call(lambda: ws.get_all_values())
     buf = io.StringIO()
-    csv.writer(buf).writerows(ws.get_all_values())
+    csv.writer(buf).writerows(vals)
     buf.seek(0)
     return pd.read_csv(buf, **read_csv_kwargs)
+
+def _ler_aba_raw(sheet_id, aba):
+    """Lê uma aba como DataFrame BRUTO (sem cabeçalho e sem detecção de separador),
+    direto das células — ideal para layouts livres (PDDE por escola / Programas).
+    Evita erros de parse do pd.read_csv(sep=None) e usa retry para 429/5xx."""
+    ws = _abrir_ws(sheet_id, aba)
+    vals = _gs_call(lambda: ws.get_all_values())
+    return pd.DataFrame(vals)
 
 
 def _fonte(sid, aba, path_local, **kwargs):
@@ -201,6 +250,20 @@ def _fonte(sid, aba, path_local, **kwargs):
         except Exception:
             pass
     return pd.read_csv(path_local, **kwargs)
+
+
+def _fonte_raw(sid, aba, path_local):
+    """Como _fonte, mas leitura BRUTA (get_all_values → DataFrame, sem sniff de
+    separador) para layouts livres (PDDE por escola / Programas). Tenta a API
+    (com retry); só cai no CSV local se a API falhar de fato."""
+    if sid:
+        try:
+            return _ler_aba_raw(sid, aba)
+        except Exception:
+            pass
+    if path_local:
+        return pd.read_csv(path_local, header=None, dtype=str)
+    raise FileNotFoundError("sem fonte (API e local) para a aba %r" % aba)
 
 
 # ── NORMALIZAÇÃO DE CABEÇALHOS DE MÊS (regra universal iG2P) ──────────────────
@@ -759,9 +822,7 @@ def _parse_pdde_escolas(raw):
 def load_acompanhamentos():
     df_prog = df_esc = None
     try:                                    # Programas — detecta a linha do cabeçalho ('PROGRAMAS')
-        _rawp = _fonte(ACOMP_SHEET_PROGRAMAS, ACOMP_ABA,
-                       buscar_arquivo("zEducação/São Roque de Minas_PROG.csv"),
-                       sep=None, engine='python', encoding='utf-8', header=None, dtype=str)
+        _rawp = _fonte_raw(ACOMP_SHEET_PROGRAMAS, ACOMP_ABA, buscar_arquivo("zEducação/São Roque de Minas_PROG.csv"))
         _hi = 0
         for _k in range(min(6, len(_rawp))):
             if _rawp.iloc[_k].astype(str).str.upper().str.contains('PROGRAMAS').any():
@@ -772,9 +833,7 @@ def load_acompanhamentos():
     except Exception:
         df_prog = None
     try:                                    # Escolas/PDDE — layout livre (sem cabeçalho fixo)
-        df_esc = _fonte(ACOMP_SHEET_ESCOLAS, ACOMP_ABA,
-                        buscar_arquivo("zEducação/São Roque de Minas_PDDE.csv"),
-                        sep=None, engine='python', encoding='utf-8', header=None, dtype=str)
+        df_esc = _fonte_raw(ACOMP_SHEET_ESCOLAS, ACOMP_ABA, buscar_arquivo("zEducação/São Roque de Minas_PDDE.csv"))
     except Exception:
         df_esc = None
     return df_prog, df_esc
