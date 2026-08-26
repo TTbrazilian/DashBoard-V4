@@ -371,7 +371,7 @@ if _LOGO_ESCURO or _LOGO_CLARO:
 #  _REL_FOLHA   : elementos de folha (mesma lista do gráfico "Folha de Pagamento").
 #  Fontes assumidas: próprios=15001 · FUNDEB 70%=15407 · FUNDEB 30%=15403.
 # ══════════════════════════════════════════════════════════════════════════════
-_REL_DESC_25 = 121108.8
+_REL_DESC_25 = 0.0
 _REL_FOLHA = [
             'Vencimentos e Vantagens Fixas - Pessoal Civil',
             'Obrigações Patronais',
@@ -755,7 +755,7 @@ def _parse_pdde_escolas(raw):
     for _, r in raw.iterrows():
         c0 = str(r.iloc[0]).strip()
         c1 = str(r.iloc[1]).strip() if raw.shape[1] > 1 else ""
-        if c1.lower().startswith("previsto"):
+        if "previsto" in c1.lower():   # casa "Previstos" e "Recursos Previstos"
             nome = c0.strip('*').strip()
             cur = None if nome.lower() == "escolas" else nome
             if cur:
@@ -1072,6 +1072,34 @@ if df_f_raw is not None and df_r is not None:
             delta_val = exec_perc if saldo >= 0 else -exec_perc
             st.metric("Saldo (Receitas − Despesas Vigentes)", formar_real(saldo),
                       delta=f"{delta_val:.1f}% Saldo", delta_color="normal")
+
+        # ── Composição das Receitas FUNDEB (Rendimentos + VAAT + VAAR + ETI) ──
+        st.markdown(
+            "<p style='font-size:.82rem;color:#94A3B8;margin:6px 0 4px 0'>"
+            "📊 <b>Composição das Receitas FUNDEB</b> — detalhamento por subcategoria</p>",
+            unsafe_allow_html=True
+        )
+        _val_principal = soma(df_r_fundeb[df_r_fundeb['Subcategoria']=='Principal'], meses_disponiveis)
+        _val_rend      = soma(df_r_fundeb[df_r_fundeb['Subcategoria']=='Rendimentos'], meses_disponiveis)
+        _val_vaat      = soma(df_r_fundeb[df_r_fundeb['Subcategoria']=='VAAT'], meses_disponiveis)
+        _val_vaar      = soma(df_r_fundeb[df_r_fundeb['Subcategoria']=='VAAR'], meses_disponiveis)
+        _val_eti       = soma(df_r_fundeb[df_r_fundeb['Subcategoria']=='ETI'], meses_disponiveis)
+        _c1, _c2, _c3, _c4, _c5 = st.columns(5)
+        with _c1: st.metric("Principal", formar_real(_val_principal),
+                             delta=f"{_val_principal/tot_rec_periodo*100:.1f}% do total" if tot_rec_periodo>0 else "—",
+                             delta_color="off")
+        with _c2: st.metric("Rendimentos FUNDEB", formar_real(_val_rend),
+                             delta=f"{_val_rend/tot_rec_periodo*100:.1f}% do total" if tot_rec_periodo>0 else "—",
+                             delta_color="off")
+        with _c3: st.metric("VAAT (entra 70% e 4%)", formar_real(_val_vaat),
+                             delta=f"{_val_vaat/tot_rec_periodo*100:.1f}% do total" if tot_rec_periodo>0 else "—",
+                             delta_color="off")
+        with _c4: st.metric("VAAR (só 4%)", formar_real(_val_vaar),
+                             delta=f"{_val_vaar/tot_rec_periodo*100:.1f}% do total" if tot_rec_periodo>0 else "—",
+                             delta_color="off")
+        with _c5: st.metric("ETI (Tempo Integral)", formar_real(_val_eti),
+                             delta=f"{_val_eti/tot_rec_periodo*100:.1f}% do total" if tot_rec_periodo>0 else "—",
+                             delta_color="off")
 
         tipo_rd = st.segmented_control("Visualização:", ["Mensal","Acumulado"],
                                        default="Mensal", key="rd_btn_f")
@@ -1413,7 +1441,7 @@ if df_f_raw is not None and df_r is not None:
         df_df_15001 = df_df_raw[(df_df_raw['Fonte']=='15001') &
                                  (df_df_raw['Tipo']==fase_despesa)].copy()
 
-        _desconto_fundeb_nao_util = 121_108.80
+        _desconto_fundeb_nao_util = 0.0
         _desconto_superavit_ant   = 0.0
         _total_descontos_25       = _desconto_fundeb_nao_util + _desconto_superavit_ant
 
@@ -1730,7 +1758,7 @@ if df_f_raw is not None and df_r is not None:
             'PNAE':  ['1552'],
             'PNATE': ['1553'],
             'PTE':   ['1576'],
-            'QESE':  ['1550','2550'],
+            'QESE':  ['1550'],   # só 1550 (2550 = superávit anos ant. — não considerar)
         }
         programas  = ['PNAE','PNATE','PTE','QESE']
         COR_PROG   = {'PNAE':'#1a7a4a','PNATE':'#17a589','PTE':'#2980b9','QESE':'#1565c0'}
