@@ -200,25 +200,90 @@ def _conectar_sheets():
     return gspread.authorize(cred)
 
 
+def _norm_aba(s):
+    """Normaliza o título de uma aba: remove acentos, caixa e espaços redundantes."""
+    import unicodedata
+    s = unicodedata.normalize('NFKD', str(s)).encode('ascii', 'ignore').decode('ascii')
+    return ' '.join(s.lower().split())
+
+
+def _norm_aba_sing(s):
+    """Como _norm_aba, mas remove o 's' final de cada palavra para tolerar
+    diferenças de singular/plural (ex.: 'Receitas'≈'Receita', 'Vinculadas'≈'Vinculada')."""
+    return ' '.join(w[:-1] if len(w) > 3 and w.endswith('s') else w
+                    for w in _norm_aba(s).split())
+
+
+def _gs_call(fn, tentativas=4, espera=1.0):
+    """Chamada à API do Google Sheets com retry/backoff para erros transitórios
+    (429 rate-limit, 5xx, timeout). Erros definitivos são relançados na hora."""
+    import time
+    _ult = None
+    for _i in range(tentativas):
+        try:
+            return fn()
+        except Exception as _e:
+            _ult = _e
+            _m = str(_e).lower()
+            _transit = any(t in _m for t in ('429', 'quota', 'rate limit', 'ratelimit',
+                                             'resource has been exhausted', '500', '502',
+                                             '503', 'internal error', 'backend',
+                                             'temporarily', 'timeout', 'timed out',
+                                             'deadline', 'connection'))
+            if _i < tentativas - 1 and _transit:
+                time.sleep(espera * (2 ** _i))
+                continue
+            raise
+    if _ult:
+        raise _ult
+
+
+def _abrir_ws(sheet_id, aba):
+    """Abre a worksheet casando o nome de forma tolerante: exato → sem acento/caixa/
+    espaço → sem plural → contido. Com retry para erros transitórios da API."""
+    sh = _gs_call(lambda: _conectar_sheets().open_by_key(sheet_id))
+    try:
+        return _gs_call(lambda: sh.worksheet(aba))
+    except Exception:
+        cands = _gs_call(lambda: sh.worksheets())
+        _an = _norm_aba(aba); _as = _norm_aba_sing(aba)
+        for _w in cands:
+            if _norm_aba(_w.title) == _an:
+                return _w
+        for _w in cands:
+            if _norm_aba_sing(_w.title) == _as:
+                return _w
+        for _w in cands:
+            _tn = _norm_aba(_w.title)
+            if _an and (_an in _tn or _tn in _an):
+                return _w
+        raise KeyError("aba '%s' nao encontrada na planilha" % aba)
+
+
 def _ler_aba(sheet_id, aba, **read_csv_kwargs):
-    """Lê uma aba do Google Sheets com a MESMA semântica do pd.read_csv de arquivo
-    (reconstrói o CSV a partir das células e reusa pd.read_csv; byte-fiel)."""
-    ws = _conectar_sheets().open_by_key(sheet_id).worksheet(aba)
+    """Lê uma aba do Google Sheets reconstruindo o CSV a partir das células e
+    reutilizando pd.read_csv. Casa o nome da aba de forma tolerante (acento/caixa/
+    espaço/singular-plural) e usa retry para erros transitórios."""
+    ws = _abrir_ws(sheet_id, aba)
+    vals = _gs_call(lambda: ws.get_all_values())
     buf = io.StringIO()
-    csv.writer(buf).writerows(ws.get_all_values())
+    csv.writer(buf).writerows(vals)
     buf.seek(0)
     return pd.read_csv(buf, **read_csv_kwargs)
 
 
 def _fonte(sid, aba, path_local, **kwargs):
-    """Fonte de dados: Google Sheets (se sid configurado) → CSV local (fallback)."""
+    """Fonte de dados: Google Sheets (se sid configurado) → CSV local (fallback).
+    Não quebra se não houver arquivo local — nesse caso depende só da API."""
     if sid:
         try:
             kw = {k: v for k, v in kwargs.items() if k != "encoding"}
             return _ler_aba(sid, aba, **kw)
         except Exception:
             pass
-    return pd.read_csv(path_local, **kwargs)
+    if path_local:
+        return pd.read_csv(path_local, **kwargs)
+    raise FileNotFoundError("sem fonte (API e local) para a aba %r" % aba)
 
 
 @st.cache_data(ttl=300)
@@ -261,7 +326,7 @@ def load_data():
 
     # ── RECEITAS (Impostos + Cota-Parte) ─────────────────────────────────────
     df_r = None
-    if path_r:
+    if sid or path_r:
         df_r = _fonte(sid, "Receitas de Impostos", path_r, sep=None, engine='python', encoding='utf-8', header=0)
         df_r.columns = [str(c).strip() for c in df_r.columns]
         if 'Categoria' in df_r.columns:
@@ -285,7 +350,7 @@ def load_data():
 
     # ── RECEITAS VINCULADAS (Federal/Estadual por categoria) ─────────────────
     df_rv = None
-    if path_rv:
+    if sid or path_rv:
         df_rv = _fonte(sid, "Receitas Vinculadas", path_rv, sep=None, engine='python', encoding='utf-8', header=0)
         df_rv.columns = [str(c).strip() for c in df_rv.columns]
         for c in ['Origem','Tipo','Categoria']:
