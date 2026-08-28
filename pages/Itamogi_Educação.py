@@ -327,7 +327,7 @@ def load_all_data():
 
     # Receitas — header=0 direto
     df_r = _fonte(sid, "Receitas", path_r, sep=None, engine='python', encoding='utf-8', header=0)
-    df_r.columns = [str(c).strip() for c in dr.columns] if False else [str(c).strip() for c in df_r.columns]
+    df_r.columns = [str(c).strip() for c in df_r.columns]
     COLS_R = ORDEM_MESES + ['Total','Orçado Receitas','Repasse','2025']
     for col in df_r.columns:
         if col in COLS_R:

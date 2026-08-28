@@ -182,17 +182,64 @@ def _conectar_sheets():
     return gspread.authorize(cred)
 
 
+def _norm_aba(s):
+    """Normaliza o título de uma aba: remove acentos, caixa e espaços redundantes."""
+    import unicodedata
+    s = unicodedata.normalize('NFKD', str(s)).encode('ascii', 'ignore').decode('ascii')
+    return ' '.join(s.lower().split())
+
+
+def _norm_aba_sing(s):
+    """Como _norm_aba, mas remove o 's' final de cada palavra p/ tolerar
+    singular/plural (ex.: 'Convênios'≈'Convênio', 'Emendas'≈'Emenda')."""
+    return ' '.join(w[:-1] if len(w) > 3 and w.endswith('s') else w
+                    for w in _norm_aba(s).split())
+
+
+def _gs_call(fn, tentativas=4, espera=1.0):
+    """Chamada à API do Google Sheets com retry/backoff para erros transitórios
+    (429 rate-limit, 5xx, timeout). Erros definitivos são relançados na hora."""
+    import time
+    _ult = None
+    for _i in range(tentativas):
+        try:
+            return fn()
+        except Exception as _e:
+            _ult = _e
+            _m = str(_e).lower()
+            _transit = any(t in _m for t in ('429', 'quota', 'rate limit', 'ratelimit',
+                                             'resource has been exhausted', '500', '502',
+                                             '503', 'internal error', 'backend',
+                                             'temporarily', 'timeout', 'timed out',
+                                             'deadline', 'connection'))
+            if _i < tentativas - 1 and _transit:
+                time.sleep(espera * (2 ** _i))
+                continue
+            raise
+    if _ult:
+        raise _ult
+
+
 def _abrir_aba(gc, sheet_id, nome_aba):
-    """Abre a aba tolerando diferenças de espaço/caixa no nome."""
-    sh = gc.open_by_key(sheet_id)
+    """Abre a aba casando o nome de forma tolerante: exato → sem acento/caixa/espaço
+    → sem plural → contido. Com retry para erros transitórios da API."""
+    sh = _gs_call(lambda: gc.open_by_key(sheet_id))
     try:
-        return sh.worksheet(nome_aba)
+        return _gs_call(lambda: sh.worksheet(nome_aba))
     except Exception:
-        alvo = nome_aba.strip().lower()
-        for ws in sh.worksheets():
-            if ws.title.strip().lower() == alvo:
+        cands = _gs_call(lambda: sh.worksheets())
+        _an = _norm_aba(nome_aba); _as = _norm_aba_sing(nome_aba)
+        for ws in cands:
+            if _norm_aba(ws.title) == _an:
                 return ws
-        raise
+        for ws in cands:
+            if _norm_aba_sing(ws.title) == _as:
+                return ws
+        for ws in cands:
+            _tn = _norm_aba(ws.title)
+            if _an and (_an in _tn or _tn in _an):
+                return ws
+        raise KeyError("aba '%s' nao encontrada na planilha" % nome_aba)
 
 
 def _valores_para_df(valores):
@@ -239,7 +286,7 @@ def load_convenios(municipio: str, sid: str):
                 # não pode derrubar a página inteira → vira DataFrame vazio.
                 try:
                     ws = _abrir_aba(gc, sid, aba)
-                    dados[chave] = _valores_para_df(ws.get_all_values())
+                    dados[chave] = _valores_para_df(_gs_call(lambda: ws.get_all_values()))
                 except Exception:
                     dados[chave] = pd.DataFrame()
             return dados, aviso

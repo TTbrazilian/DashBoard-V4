@@ -429,7 +429,7 @@ if _LOGO_ESCURO or _LOGO_CLARO:
 #  _REL_FOLHA   : elementos de folha (mesma lista do gráfico "Folha de Pagamento").
 #  Fontes assumidas: próprios=15001 · FUNDEB 70%=15407 · FUNDEB 30%=15403.
 # ══════════════════════════════════════════════════════════════════════════════
-_REL_DESC_25 = 424933.00   # Superávit de exercícios anteriores
+_REL_DESC_25 = 424933.00   # FUNDEB não utilizado
 _REL_FOLHA = [
             'Vencimentos e Vantagens Fixas - Pessoal Civil',
             'Obrigações Patronais',
@@ -1507,8 +1507,8 @@ if df_f_raw is not None and df_r is not None:
         df_df_15001 = df_df_raw[(df_df_raw['Fonte']=='15001') &
                                  (df_df_raw['Tipo']==fase_despesa)].copy()
 
-        _desconto_fundeb_nao_util = 0.0
-        _desconto_superavit_ant   = 424_933.00   # Superávit de exercícios anteriores
+        _desconto_fundeb_nao_util = 424_933.00   # FUNDEB não utilizado
+        _desconto_superavit_ant   = 0.0
         _total_descontos_25       = _desconto_fundeb_nao_util + _desconto_superavit_ant
         total_desp_15001 = df_df_15001[meses_disponiveis].sum().sum()
         esforco_total    = max(0.0, total_desp_15001 + tot_deducoes - _total_descontos_25)
