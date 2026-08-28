@@ -272,14 +272,14 @@ def _ler_aba(sheet_id, aba, **read_csv_kwargs):
 
 
 def _fonte(sid, aba, path_local, **kwargs):
-    """Fonte de dados: Google Sheets (se sid configurado) → CSV local (fallback).
-    Não quebra se não houver arquivo local — nesse caso depende só da API."""
+    """Fonte de dados com PRIORIDADE TOTAL para a resposta viva da API.
+    Se 'sid' está configurado, a API é AUTORITATIVA: já traz retry embutido para
+    falhas transitórias e, se ainda assim falhar, o erro é PROPAGADO — nunca cai
+    silenciosamente em CSV local defasado (evita mascarar dados antigos). O CSV
+    local só é usado quando NÃO há API configurada (sid vazio)."""
     if sid:
-        try:
-            kw = {k: v for k, v in kwargs.items() if k != "encoding"}
-            return _ler_aba(sid, aba, **kw)
-        except Exception:
-            pass
+        kw = {k: v for k, v in kwargs.items() if k != "encoding"}
+        return _ler_aba(sid, aba, **kw)
     if path_local:
         return pd.read_csv(path_local, **kwargs)
     raise FileNotFoundError("sem fonte (API e local) para a aba %r" % aba)
@@ -613,7 +613,14 @@ def _pdf_relatorio_saude(d, municipio, secretaria=None):
     return buf.getvalue()
 
 
-df_raw, df_r, df_df, df_rv = load_data()
+try:
+    df_raw, df_r, df_df, df_rv = load_data()
+except Exception as _e_load:
+    st.error("⚠️ Não foi possível ler os dados **vivos** da planilha via API "
+             f"({type(_e_load).__name__}: {_e_load}). Os dados **não foram atualizados**. "
+             "Para evitar decisões com base em números defasados, nenhum dado antigo é "
+             "exibido — verifique a planilha (nomes de aba/estrutura/permissão) e recarregue.")
+    st.stop()
 
 def _detectar_meses(df_f, df_dfonte):
     out = []
