@@ -179,7 +179,30 @@ def _conectar_sheets():
                "https://www.googleapis.com/auth/drive.readonly"]
     cred = Credentials.from_service_account_info(
         dict(st.secrets["gcp_service_account"]), scopes=escopos)
-    return gspread.authorize(cred)
+    gc = gspread.authorize(cred)
+    # Timeout HTTP explícito → se a API travar, a chamada falha em ~15s (tratada
+    # pelo retry/erro) em vez de pendurar a página em spinner infinito.
+    try:
+        gc.set_timeout(15)                     # gspread 6.x (Client → HTTPClient)
+    except Exception:
+        try:
+            gc.http_client.set_timeout(15)
+        except Exception:
+            try:                               # gspread 5.x: força timeout na sessão
+                _hc = getattr(gc, 'http_client', None)
+                _s = getattr(gc, 'session', None)
+                if _s is None and _hc is not None:
+                    _s = getattr(_hc, 'session', None)
+                if _s is not None:
+                    _orig_req = _s.request
+                    def _req_timeout(*a, **k):
+                        if not k.get('timeout'):
+                            k['timeout'] = 15
+                        return _orig_req(*a, **k)
+                    _s.request = _req_timeout
+            except Exception:
+                pass
+    return gc
 
 
 def _norm_aba(s):
@@ -189,7 +212,7 @@ def _norm_aba(s):
     s = unicodedata.normalize('NFKD', str(s)).encode('ascii', 'ignore').decode('ascii')
     return ' '.join(s.lower().split())
 
-def _gs_call(fn, tentativas=4, espera=1.0):
+def _gs_call(fn, tentativas=3, espera=1.0):
     """Chamada à API do Google Sheets com retry/backoff para erros transitórios
     (429 rate-limit, 5xx, timeout). Erros definitivos (acesso negado, aba ausente)
     são relançados imediatamente, sem retry."""
@@ -201,11 +224,13 @@ def _gs_call(fn, tentativas=4, espera=1.0):
         except Exception as _e:
             _ult = _e
             _m = str(_e).lower()
+            # timeout NÃO re-tenta (falha rápido em ~15s p/ não pendurar a página);
+            # 429/5xx re-tentam (respondem rápido, só custam o backoff).
             _transit = any(t in _m for t in ('429', 'quota', 'rate limit', 'ratelimit',
                                              'resource has been exhausted', '500', '502',
                                              '503', 'internal error', 'backend',
-                                             'temporarily', 'timeout', 'timed out',
-                                             'deadline', 'connection'))
+                                             'temporarily', 'connection reset',
+                                             'connection aborted'))
             if _i < tentativas - 1 and _transit:
                 time.sleep(espera * (2 ** _i))
                 continue
