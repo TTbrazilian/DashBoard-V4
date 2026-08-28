@@ -873,6 +873,13 @@ def load_acompanhamentos():
 try:
     df_f_raw, df_r, df_df_raw = load_all_data()
 except Exception as _e_load:
+    try:  # libera o loader; senão o overlay do logo esconde o aviso e parece "travado"
+        _html_iframe("<script>(function(){try{var d=window.parent.document;"
+                     "var l=d.querySelectorAll('.ig2p-loader');"
+                     "for(var i=0;i<l.length;i++){l[i].classList.add('ig2p-done');}"
+                     "}catch(e){}})()</script>", height=0)
+    except Exception:
+        pass
     st.error("⚠️ Não foi possível ler os dados **vivos** da planilha via API "
              f"({type(_e_load).__name__}: {_e_load}). Os dados **não foram atualizados**. "
              "Para evitar decisões com base em números defasados, nenhum dado antigo é "
