@@ -297,14 +297,16 @@ def _ler_aba(sheet_id, aba, **read_csv_kwargs):
 
 
 def _fonte(sid, aba, path_local, **kwargs):
-    """Fonte de dados com PRIORIDADE TOTAL para a resposta viva da API.
-    Se 'sid' está configurado, a API é AUTORITATIVA: já traz retry embutido para
-    falhas transitórias e, se ainda assim falhar, o erro é PROPAGADO — nunca cai
-    silenciosamente em CSV local defasado (evita mascarar dados antigos). O CSV
-    local só é usado quando NÃO há API configurada (sid vazio)."""
+    """Fonte de dados: tenta a API viva (com retry) e, se ela falhar (ex.: 404
+    SpreadsheetNotFound, ID placeholder, rede), usa o CSV local para a página
+    continuar funcionando em vez de travar com erro. Sem API configurada, usa o
+    local direto."""
     if sid:
-        kw = {k: v for k, v in kwargs.items() if k != "encoding"}
-        return _ler_aba(sid, aba, **kw)
+        try:
+            kw = {k: v for k, v in kwargs.items() if k != "encoding"}
+            return _ler_aba(sid, aba, **kw)
+        except Exception:
+            pass
     if path_local:
         return pd.read_csv(path_local, **kwargs)
     raise FileNotFoundError("sem fonte (API e local) para a aba %r" % aba)
@@ -648,10 +650,22 @@ except Exception as _e_load:
                      "}catch(e){}})()</script>", height=0)
     except Exception:
         pass
-    st.error("⚠️ Não foi possível ler os dados **vivos** da planilha via API "
-             f"({type(_e_load).__name__}: {_e_load}). Os dados **não foram atualizados**. "
-             "Para evitar decisões com base em números defasados, nenhum dado antigo é "
-             "exibido — verifique a planilha (nomes de aba/estrutura/permissão) e recarregue.")
+    if isinstance(_e_load, PermissionError):
+        _sa = ""
+        try:
+            _sa = dict(st.secrets["gcp_service_account"]).get("client_email", "")
+        except Exception:
+            pass
+        st.error("🔒 A conta de serviço **não tem acesso** à planilha deste município "
+                 "(a API do Google retornou 403 FORBIDDEN). Compartilhe a planilha do "
+                 "Google Sheets com o e-mail **" + (_sa or "da conta de serviço") + "** "
+                 "como *Leitor* e recarregue. Os demais municípios funcionam porque suas "
+                 "planilhas já estão compartilhadas com essa conta.")
+    else:
+        st.error("⚠️ Não foi possível ler os dados **vivos** da planilha via API "
+                 f"({type(_e_load).__name__}: {_e_load}). Os dados **não foram atualizados**. "
+                 "Para evitar decisões com base em números defasados, nenhum dado antigo é "
+                 "exibido — verifique a planilha (nomes de aba/estrutura/permissão) e recarregue.")
     st.stop()
 
 def _detectar_meses(df_f, df_dfonte):

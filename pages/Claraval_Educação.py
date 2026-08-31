@@ -874,10 +874,22 @@ except Exception as _e_load:
                      "}catch(e){}})()</script>", height=0)
     except Exception:
         pass
-    st.error("⚠️ Não foi possível ler os dados **vivos** da planilha via API "
-             f"({type(_e_load).__name__}: {_e_load}). Os dados **não foram atualizados**. "
-             "Para evitar decisões com base em números defasados, nenhum dado antigo é "
-             "exibido — verifique a planilha (nomes de aba/estrutura/permissão) e recarregue.")
+    if isinstance(_e_load, PermissionError):
+        _sa = ""
+        try:
+            _sa = dict(st.secrets["gcp_service_account"]).get("client_email", "")
+        except Exception:
+            pass
+        st.error("🔒 A conta de serviço **não tem acesso** à planilha deste município "
+                 "(a API do Google retornou 403 FORBIDDEN). Compartilhe a planilha do "
+                 "Google Sheets com o e-mail **" + (_sa or "da conta de serviço") + "** "
+                 "como *Leitor* e recarregue. Os demais municípios funcionam porque suas "
+                 "planilhas já estão compartilhadas com essa conta.")
+    else:
+        st.error("⚠️ Não foi possível ler os dados **vivos** da planilha via API "
+                 f"({type(_e_load).__name__}: {_e_load}). Os dados **não foram atualizados**. "
+                 "Para evitar decisões com base em números defasados, nenhum dado antigo é "
+                 "exibido — verifique a planilha (nomes de aba/estrutura/permissão) e recarregue.")
     st.stop()
 
 # ATUALIZADO: 4 meses disponíveis

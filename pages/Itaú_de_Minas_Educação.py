@@ -259,7 +259,7 @@ def _dados_relatorio(df_f, df_r, df_df, meses):
     FOLHA = ['Vencimentos e Vantagens Fixas - Pessoal Civil','Obrigações Patronais',
              'Contratação por tempo Determinado','Outras Despesas Variáveis - Pessoal Civil',
              'Indenizações e Restituições Trabalhistas','Auxílio-alimentação',
-             'Diárias - Pessoal Civil','Contribuições']
+             'Diárias - Pessoal Civil']
     d['folha_total'] = df_f[df_f['Elemento'].isin(FOLHA)][liq_cols].sum().sum()
     return d
 
@@ -514,7 +514,7 @@ def _pdf_relatorio(d, municipio, secretaria=None):
 # Individualidades ITM:
 # • VAAR e VAAT separados; só VAAT entra na base ETI
 # • Base 70% = Principal + Rendimentos
-# • Novos elementos folha: 'Diárias - Pessoal Civil', 'Contribuições'
+# • Novos elementos folha: 'Diárias - Pessoal Civil'
 # ── LEITURA VIA GOOGLE SHEETS (com fallback CSV local durante a migração) ─────
 @st.cache_resource
 def _conectar_sheets():
@@ -805,10 +805,22 @@ except Exception as _e_load:
                      "}catch(e){}})()</script>", height=0)
     except Exception:
         pass
-    st.error("⚠️ Não foi possível ler os dados **vivos** da planilha via API "
-             f"({type(_e_load).__name__}: {_e_load}). Os dados **não foram atualizados**. "
-             "Para evitar decisões com base em números defasados, nenhum dado antigo é "
-             "exibido — verifique a planilha (nomes de aba/estrutura/permissão) e recarregue.")
+    if isinstance(_e_load, PermissionError):
+        _sa = ""
+        try:
+            _sa = dict(st.secrets["gcp_service_account"]).get("client_email", "")
+        except Exception:
+            pass
+        st.error("🔒 A conta de serviço **não tem acesso** à planilha deste município "
+                 "(a API do Google retornou 403 FORBIDDEN). Compartilhe a planilha do "
+                 "Google Sheets com o e-mail **" + (_sa or "da conta de serviço") + "** "
+                 "como *Leitor* e recarregue. Os demais municípios funcionam porque suas "
+                 "planilhas já estão compartilhadas com essa conta.")
+    else:
+        st.error("⚠️ Não foi possível ler os dados **vivos** da planilha via API "
+                 f"({type(_e_load).__name__}: {_e_load}). Os dados **não foram atualizados**. "
+                 "Para evitar decisões com base em números defasados, nenhum dado antigo é "
+                 "exibido — verifique a planilha (nomes de aba/estrutura/permissão) e recarregue.")
     st.stop()
 
 # ATUALIZADO: 4 meses
@@ -1953,7 +1965,6 @@ if df_f_raw is not None and df_r is not None:
             'Indenizações e Restituições Trabalhistas',
             'Auxílio-alimentação',
             'Diárias - Pessoal Civil',   # ← novo
-            'Contribuições',             # ← novo
         ]
         liq_cols_f = [f"{m}_Liquidado" for m in meses_disponiveis
                       if f"{m}_Liquidado" in df_f_raw.columns]
