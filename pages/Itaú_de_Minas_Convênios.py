@@ -276,6 +276,31 @@ def _valores_para_df(valores):
     df = pd.read_csv(buf, header=1, dtype=str, keep_default_na=False)
     df = df.loc[:, ~df.columns.astype(str).str.match(r"^Unnamed: 0")]
     df.columns = [str(c).strip() for c in df.columns]
+    # ── Aliases canônicos: a planilha usa nomes diferentes dos que o código soma
+    #    (ex.: 'Repasse Pactuado' → 'Valor Repasse'; 'Contrapartida Pactuada' →
+    #    'Contrapartida'). Mapeia por nome normalizado (acento/caixa/espaço) sem
+    #    apagar as colunas originais — é isso que impede os KPIs de zerar.
+    import unicodedata
+    def _cn(x):
+        x = unicodedata.normalize('NFKD', str(x)).encode('ascii', 'ignore').decode('ascii')
+        return ' '.join(x.lower().split())
+    _real = {}
+    for _c in df.columns:
+        _real.setdefault(_cn(_c), _c)
+    _alias = {
+        "Valor Repasse":  ["Repasse Pactuado"],
+        "Valor":          ["Repasse Pactuado"],
+        "Contrapartida":  ["Contrapartida Pactuada", "Contrapartida Pactuado"],
+        "Saldo em Conta": ["Valor do Saldo", "Saldo", "Valor em Conta"],
+        "Recebido":       ["Repasse Recebido"],
+    }
+    for _canon, _fontes in _alias.items():
+        if _canon in df.columns:
+            continue
+        for _src in _fontes:
+            if _cn(_src) in _real:
+                df[_canon] = df[_real[_cn(_src)]]
+                break
     return df
 
 
