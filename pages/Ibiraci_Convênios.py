@@ -285,16 +285,33 @@ def _valores_para_df(valores):
 
 
 def _sheet_id_do_municipio():
-    """Lê o sheet_id do município atual em [convenios]. Aceita mapa por município
-    ( "Alpinópolis" = "id..." ) ou a chave única legada ( sheet_id = "id..." )."""
+    """Lê o sheet_id do município atual em [convenios]. Casa a chave de forma
+    tolerante (acento/caixa e espaço = underscore, ex.: 'Itaú de Minas' ≈
+    'Itaú_de_Minas'), remove espaços acidentais no valor e ignora placeholders."""
     if "convenios" not in st.secrets:
         return None
     sec = st.secrets["convenios"]
+    import unicodedata
+    def _nz(x):
+        x = unicodedata.normalize('NFKD', str(x)).encode('ascii', 'ignore').decode('ascii')
+        return ' '.join(x.lower().replace('_', ' ').split())
+    val = None
     if MUNICIPIO in sec:
-        return sec[MUNICIPIO]
-    if "sheet_id" in sec:
-        return sec["sheet_id"]
-    return None
+        val = sec[MUNICIPIO]
+    else:
+        _alvo = _nz(MUNICIPIO)
+        for _k in sec.keys():
+            if _nz(_k) == _alvo:
+                val = sec[_k]
+                break
+    if val is None and "sheet_id" in sec:
+        val = sec["sheet_id"]
+    if val is None:
+        return None
+    val = str(val).strip()
+    if not val or _nz(val).startswith(("id da", "cole", "<")):
+        return None
+    return val
 
 
 @st.cache_data(ttl=600, show_spinner=False)
