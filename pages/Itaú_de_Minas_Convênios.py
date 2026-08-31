@@ -939,12 +939,12 @@ def render_emendas(chave, titulo, dim_orgao, cor):
     kpi_row([("Nº de Emendas", str(len(df))),
              ("Valor Total", formar_real(tot)),
              ("Saldo em Conta", formar_real(tot_sal)),
-             ("Parlamentares", str(df["Parlamentar"].astype(str).str.strip().nunique()
-                                    if "Parlamentar" in df.columns else 0))])
+             ("Deputados", str(df["Deputado"].astype(str).str.strip().nunique()
+                                    if "Deputado" in df.columns else 0))])
 
     st.markdown("---")
-    st.subheader("Valor por Parlamentar")
-    barras_por(df, "Parlamentar", "Valor", "Parlamentar", cor=cor, topn=15)
+    st.subheader("Valor por Deputado")
+    barras_por(df, "Deputado", "Valor", "Deputado", cor=cor, topn=15)
 
     st.markdown("---")
     c1, c2 = st.columns(2)
@@ -972,7 +972,7 @@ def render_emendas(chave, titulo, dim_orgao, cor):
                 st.plotly_chart(fig, use_container_width=True, config=CONFIG_PT)
 
     st.markdown("---")
-    tabela_detalhe(df, ["Parlamentar", dim_orgao, "Ano", "Objeto", "Valor",
+    tabela_detalhe(df, ["Deputado", dim_orgao, "Ano", "Objeto", "Valor",
                         "GND", "Data Pagamento", "Status Plano de Trabalho"])
 
 
