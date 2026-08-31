@@ -291,16 +291,14 @@ def _ler_aba(sheet_id, aba, **read_csv_kwargs):
 
 
 def _fonte(sid, aba, path_local, **kwargs):
-    """Fonte de dados: tenta a API viva (com retry) e, se ela falhar (ex.: 404
-    SpreadsheetNotFound, ID placeholder, rede), usa o CSV local para a página
-    continuar funcionando em vez de travar com erro. Sem API configurada, usa o
-    local direto."""
-    if sid:
-        try:
-            kw = {k: v for k, v in kwargs.items() if k != "encoding"}
-            return _ler_aba(sid, aba, **kw)
-        except Exception:
-            pass
+    """Fonte de dados com PRIORIDADE TOTAL para a API viva. Com 'sid' configurado,
+    a API é AUTORITATIVA (com retry): se falhar, o erro é PROPAGADO — nunca exibe
+    CSV local defasado no lugar dos dados vivos (era isso que fazia o Itaú mostrar
+    maio em vez de junho). O CSV local só é usado quando NÃO há API (sid vazio)."""
+    # ID placeholder ("COLE_O_ID...") não é API válida → usa o CSV local direto.
+    if sid and not str(sid).upper().startswith("COLE"):
+        kw = {k: v for k, v in kwargs.items() if k != "encoding"}
+        return _ler_aba(sid, aba, **kw)
     if path_local:
         return pd.read_csv(path_local, **kwargs)
     raise FileNotFoundError("sem fonte (API e local) para a aba %r" % aba)
