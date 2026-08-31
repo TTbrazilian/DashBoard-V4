@@ -322,7 +322,7 @@ def load_data():
     if not sid and not path_f: return None, None, None, None
 
     # ── FICHAS ───────────────────────────────────────────────────────────────
-    df = _fonte(sid, "Alpinópolis", path_f, sep=None, engine='python', encoding='utf-8', header=1)
+    df = _fonte(sid, "Fichas", path_f, sep=None, engine='python', encoding='utf-8', header=1)
     df.columns = [str(c).strip() for c in df.columns]
     for col in df.columns:
         if any(k in col for k in ['Orçado','Creditado','Anulado','Saldo'] + MESES_ORDEM + ['Total']):
@@ -345,7 +345,7 @@ def load_data():
     # ── RECEITAS (Impostos + Cota-Parte) ─────────────────────────────────────
     df_r = None
     if sid or path_r:
-        df_r = _fonte(sid, "Alpinópolis_R", path_r, sep=None, engine='python', encoding='utf-8', header=0)
+        df_r = _fonte(sid, "Receitas de Impostos", path_r, sep=None, engine='python', encoding='utf-8', header=0)
         df_r.columns = [str(c).strip() for c in df_r.columns]
         if 'Categoria' in df_r.columns:
             df_r['Categoria'] = df_r['Categoria'].astype(str).str.strip()
@@ -356,7 +356,7 @@ def load_data():
     # ── DESPESAS POR FONTE ───────────────────────────────────────────────────
     df_df = None
     if path_df:
-        df_df = _fonte(sid, "Alpinópolis_DF", path_df, sep=None, engine='python', encoding='utf-8')
+        df_df = _fonte(sid, "Despesas por fonte", path_df, sep=None, engine='python', encoding='utf-8')
         df_df.columns = [str(c).strip() for c in df_df.columns]
         df_df['Tipo'] = df_df['Tipo'].replace({'Empenho': 'Liquidado'})
         df_df = df_df[df_df['Tipo'].isin(['Empenhado','Liquidado','Pago'])].copy()
@@ -369,7 +369,7 @@ def load_data():
     # ── RECEITAS VINCULADAS (Federal/Estadual por categoria) ─────────────────
     df_rv = None
     if sid or path_rv:
-        df_rv = _fonte(sid, "Alpinópolis_RV", path_rv, sep=None, engine='python', encoding='utf-8', header=0)
+        df_rv = _fonte(sid, "Receitas Vinculadas", path_rv, sep=None, engine='python', encoding='utf-8', header=0)
         df_rv.columns = [str(c).strip() for c in df_rv.columns]
         for c in ['Origem','Tipo','Categoria']:
             if c in df_rv.columns: df_rv[c] = df_rv[c].astype(str).str.strip()
