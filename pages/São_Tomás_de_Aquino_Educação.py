@@ -1150,7 +1150,7 @@ if df_f_raw is not None and df_r is not None:
         p1, p2, p3 = st.columns(3)
         with p1: st.metric("Previsão Receitas (Orçamento Município)",
                             formar_real(tot_prev_municipio))
-        with p2: st.metric("Previsão de Receitas (Port. Intermin. nº 14 de 29 dez 2025)",
+        with p2: st.metric("Previsão de Receitas (Portaria MEC/MF nº 14, de 29 de dezembro de 2025)",
                             formar_real(tot_prev_portaria))
         # 'Atualização Quadrimestral' não está em COLS_R → permanece string bruta;
         # aplica limpar_valor UMA vez. % Atualização vira o delta do card.
@@ -1171,7 +1171,7 @@ if df_f_raw is not None and df_r is not None:
         _delta_quad = f"{_perc_quad:.2f}%" if _perc_quad is not None else None
 
         with p3: st.metric(
-            "Atualização Quadrimestral",
+            "2ª Atualização Quadrimestral - Portaria MEC/MF nº 11, de 28 de agosto de 2026",
             formar_real(_val_quad) if _val_quad > 0 else "—",
             delta=_delta_quad,
             delta_color="normal"
@@ -1463,44 +1463,99 @@ if df_f_raw is not None and df_r is not None:
         st.markdown("---")
 
         # ═════════════════════════════════════════════════════════════════════
-        # GRÁFICO 3 — Percentual Tempo Integral
+        # GRÁFICO 3 — Execução do FUNDEB 4% (Capital × Custeio)
         # Uma única barra (Receita Base FUNDEB) + linha de referência 4%
         # ═════════════════════════════════════════════════════════════════════
-        st.subheader("🔹 3. Percentual Tempo Integral")
-
+        st.subheader("🔹 3. Execução do FUNDEB 4% (Capital × Custeio)")
         meta_eti_perc = 4.0
-        # Base dos 4% (ETI): Principal + Rendimentos + VAAT + VAAR (VAAR entra nos 4%)
-        _base_4pct = soma(df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
-                          ['Principal','Rendimentos','VAAT','VAAR'])], meses_disponiveis)
-        val_meta_eti  = _base_4pct * (meta_eti_perc/100)
-
-        e1, e2 = st.columns(2)
-        with e1: st.metric("Total Receitas FUNDEB (período)", formar_real(tot_rec_periodo))
-        with e2: st.metric(f"Equivalente a {meta_eti_perc:.0f}% da Receita Base (4%)",
-                            formar_real(val_meta_eti))
-
-        fig_eti = go.Figure()
-        fig_eti.add_trace(go.Bar(
-            x=["Receita Base 4%\n(Principal+Rend.+VAAT+VAAR)"], y=[_base_4pct],
-            name="Receita Base", marker_color="#003366",
-            text=[formar_real(_base_4pct)],
-            textposition='inside', insidetextanchor='middle',
-            hovertemplate=("<span style='color:white;'><b>Base dos 4% (ETI)</b><br>"
-                           "Principal + Rendimentos + VAAT + VAAR<br>"
-                           "Valor: <b>"+formar_real(_base_4pct)+"</b></span><extra></extra>"),
-        ))
-        fig_eti.add_hline(
-            y=val_meta_eti, line_dash="dot", line_color="#f39c12", line_width=2,
-            annotation_text=f"Referência ETI {meta_eti_perc:.0f}% = {formar_real(val_meta_eti)}",
-            annotation_position="top left"
+        _base_eti = soma(
+            df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
+                ['Principal','Rendimentos','VAAT','VAAR'])],
+            meses_disponiveis
         )
-        fig_eti.update_layout(
-            separators=",.", hoverlabel=HOVER_STYLE,
-            yaxis=dict(showticklabels=False), showlegend=True,
-            legend=dict(orientation="h", yanchor="bottom", y=-0.20, xanchor="center", x=0.5),
-            height=380,
-        )
-        st.plotly_chart(fig_eti, use_container_width=True, config=CONFIG_PT)
+        val_meta_eti = _base_eti * (meta_eti_perc/100)
+        _cap4  = _desp_f('154071', meses_disponiveis)   # final 1071 = Capital
+        _cus4  = _desp_f('154072', meses_disponiveis)   # final 1072 = Custeio
+        _exec4 = _cap4 + _cus4
+        _perc4 = (_exec4 / _base_eti * 100) if _base_eti > 0 else 0.0
+
+        tipo_4 = st.segmented_control("Visualização:", ["Mensal","Acumulado"],
+                                      default="Mensal", key="tipo_4_btn")
+        if tipo_4 == "Acumulado":
+            b1, b2 = st.columns(2)
+            with b1: st.metric("Base de Cálculo (Principal + Rend. + VAAT + VAAR)",
+                                formar_real(_base_eti))
+            with b2: st.metric("Executado 4% – Capital + Custeio (Liquidado)",
+                                formar_real(_exec4))
+            metric_contabil("Aplicação ETI (Mín. 4%)", _perc4, meta_eti_perc)
+
+            fig_4 = go.Figure()
+            fig_4.add_trace(go.Bar(
+                x=["Receita Base\n(Principal + Rend. + VAAT + VAAR)"], y=[_base_eti],
+                name="Receita Base", marker_color="#003366",
+                text=[formar_real(_base_eti)], textposition='inside', insidetextanchor='middle',
+                hovertemplate=("<span style='color:white;'><b>Base de Cálculo do 4%</b><br>"
+                               "Valor: <b>"+formar_real(_base_eti)+"</b></span><extra></extra>")))
+            fig_4.add_trace(go.Bar(
+                x=["Executado 4%\n(Liquidado)"], y=[_cap4], name="Capital (154071)",
+                marker_color="#7b241c", text=[formar_real(_cap4) if _cap4 > 0 else ""],
+                textposition='inside', insidetextanchor='middle',
+                hovertemplate=("<span style='color:white;'><b>Capital — Fonte 154071</b><br>"
+                               "Liquidado: <b>"+formar_real(_cap4)+"</b></span><extra></extra>")))
+            fig_4.add_trace(go.Bar(
+                x=["Executado 4%\n(Liquidado)"], y=[_cus4], name="Custeio (154072)",
+                marker_color="#1e8449", text=[formar_real(_cus4) if _cus4 > 0 else ""],
+                textposition='inside', insidetextanchor='middle',
+                hovertemplate=("<span style='color:white;'><b>Custeio — Fonte 154072</b><br>"
+                               "Liquidado: <b>"+formar_real(_cus4)+"</b></span><extra></extra>")))
+            fig_4.add_annotation(x="Executado 4%\n(Liquidado)", y=_exec4,
+                text=f"<b>{formar_real(_exec4)}</b> ({_perc4:.2f}%)",
+                showarrow=False, yshift=14, font=dict(size=13, color="#333"))
+            fig_4.add_hline(y=val_meta_eti, line_dash="dot", line_color="#f39c12",
+                            annotation_text=f"Meta 4% = {formar_real(val_meta_eti)}",
+                            annotation_position="top left")
+            fig_4.update_layout(separators=",.", barmode='stack', hoverlabel=HOVER_STYLE,
+                yaxis=dict(showticklabels=False), showlegend=True,
+                legend=dict(orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5),
+                height=440, margin=dict(b=80))
+        else:
+            _meses4 = meses_disponiveis
+            _base_m4 = [soma(df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
+                            ['Principal','Rendimentos','VAAT','VAAR'])], [m]) for m in _meses4]
+            fig_4 = go.Figure()
+            fig_4.add_bar(x=_meses4, y=_base_m4, name="Receita Base",
+                          marker_color="#003366", offsetgroup='rec')
+            fig_4.add_bar(x=_meses4, y=[_desp_f('154071', [m]) for m in _meses4],
+                          name="Capital (154071)", marker_color="#7b241c", offsetgroup='desp')
+            fig_4.add_bar(x=_meses4, y=[_desp_f('154072', [m]) for m in _meses4],
+                          name="Custeio (154072)", marker_color="#1e8449", offsetgroup='desp')
+            fig_4.update_layout(barmode='stack')
+            df_meta_4 = pd.DataFrame([{"Mês": m, "Meta 4%": _bm * (meta_eti_perc/100)}
+                                      for m, _bm in zip(_meses4, _base_m4)])
+            _OFFSET = 0.22; _shapes_4 = []
+            for _i, _row in df_meta_4.iterrows():
+                _meta = _row['Meta 4%']
+                _shapes_4.append(dict(type='line', xref='x', yref='y',
+                    x0=_i-_OFFSET, x1=_i+_OFFSET, y0=_meta, y1=_meta,
+                    line=dict(color='#f39c12', dash='dot', width=2)))
+                if _i < len(df_meta_4)-1:
+                    _shapes_4.append(dict(type='line', xref='x', yref='y',
+                        x0=_i+_OFFSET, x1=_i+1-_OFFSET,
+                        y0=_meta, y1=df_meta_4.loc[_i+1, 'Meta 4%'],
+                        line=dict(color='#f39c12', dash='dot', width=2)))
+            fig_4.update_layout(shapes=_shapes_4)
+            fig_4.add_trace(go.Scatter(x=[None], y=[None], mode='lines',
+                name='Meta 4% (Mensal)', showlegend=True,
+                line=dict(color='#f39c12', dash='dot', width=2)))
+            fig_4.update_traces(selector=dict(type='bar'), textposition='outside',
+                hoverlabel=HOVER_STYLE,
+                hovertemplate=("<span style='color:white;'><b>%{x} — %{data.name}</b><br>"
+                               "Valor: <b>R$ %{y:,.2f}</b></span><extra></extra>"))
+            fig_4.update_layout(separators=",.", yaxis=dict(showticklabels=False),
+                xaxis_title=None, showlegend=True,
+                legend=dict(orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5),
+                height=460, margin=dict(b=90))
+        st.plotly_chart(fig_4, use_container_width=True, config=CONFIG_PT)
 
     # =========================================================================
     # SETOR RECURSOS PRÓPRIOS
