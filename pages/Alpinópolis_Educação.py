@@ -1139,8 +1139,17 @@ if df_f_raw is not None and df_r is not None:
         base_indice_70  = soma(df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
                                 ['Principal','Rendimentos','VAAT'])], meses_disponiveis)
         def _desp_f(fcod, meses):
-            return soma(df_df_fundeb[(df_df_fundeb['Fonte'] == fcod) &
-                                     (df_df_fundeb['Tipo'] == 'Liquidado')], meses)
+            _v = soma(df_df_fundeb[(df_df_fundeb['Fonte'] == fcod) &
+                           (df_df_fundeb['Tipo'] == 'Liquidado')], meses)
+            # FUNDEB 4% (154071/154072/154271/154272/154371/154372) é lançado na aba
+            # FICHAS, não em 'Despesas por fonte' → se não achou lá, soma das Fichas.
+            if _v == 0.0 and df_f_raw is not None and 'Fonte' in getattr(df_f_raw, 'columns', []):
+                _lc = [f"{m}_Liquidado" for m in meses if f"{m}_Liquidado" in df_f_raw.columns]
+                if _lc:
+                    _sf = df_f_raw[df_f_raw['Fonte'].astype(str).str.strip() == str(fcod)]
+                    if len(_sf):
+                        _v = float(_sf[_lc].sum().sum())
+            return _v
         desp_15407 = _desp_f('15407', meses_disponiveis)
         desp_f4 = {_f: _desp_f(_f, meses_disponiveis) for _f, _l, _c in FUNDEB4_FONTES}
         desp_f4_70    = sum(v for k, v in desp_f4.items() if k not in FUNDEB4_VAAR)
@@ -1351,8 +1360,9 @@ if df_f_raw is not None and df_r is not None:
         fig_rd.update_layout(
             separators=",.", barmode='stack', hoverlabel=HOVER_STYLE,
             showlegend=True,
-            legend=dict(orientation="h", yanchor="bottom", y=-0.30, xanchor="center", x=0.5),
-            height=500, yaxis=dict(showticklabels=False),
+            legend=dict(orientation="h", yanchor="top", y=-0.34, xanchor="center", x=0.5,
+                        font=dict(size=10)),
+            height=560, yaxis=dict(showticklabels=False), margin=dict(b=200, t=20),
             uniformtext_minsize=9, uniformtext_mode='hide',
         )
         st.plotly_chart(fig_rd, use_container_width=True, config=CONFIG_PT)
