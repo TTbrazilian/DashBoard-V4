@@ -915,6 +915,39 @@ if df_f_raw is not None and df_r is not None:
     st.sidebar.title("🔍 Filtros de Análise")
     search_term = st.sidebar.text_input("Filtrar Fichas:", "")
     st.sidebar.markdown("---")
+    # ── FILTRO DE PERÍODO (regra universal iG2P) ─────────────────────────────
+    #   Restringe meses_disponiveis → como TODOS os gráficos somam sobre ele,
+    #   a página inteira passa a respeitar o período escolhido (mensal/acumulado
+    #   continuam funcionando dentro do recorte).
+    st.sidebar.subheader("📆 Período de Análise")
+    _per_modo = st.sidebar.radio("Filtrar por:",
+        ["Todo o período", "Bimestre", "Semestre", "Personalizado (de–até)"],
+        key="per_modo_edu")
+    _mdetect = [m for m in ORDEM_MESES if m in meses_disponiveis]
+    _sel_per = None
+    if _per_modo == "Bimestre":
+        _BIMS = {"1º Bim (Jan–Fev)": ORDEM_MESES[0:2], "2º Bim (Mar–Abr)": ORDEM_MESES[2:4],
+                 "3º Bim (Mai–Jun)": ORDEM_MESES[4:6], "4º Bim (Jul–Ago)": ORDEM_MESES[6:8],
+                 "5º Bim (Set–Out)": ORDEM_MESES[8:10], "6º Bim (Nov–Dez)": ORDEM_MESES[10:12]}
+        _sel_per = _BIMS[st.sidebar.selectbox("Bimestre:", list(_BIMS.keys()), key="per_bim_edu")]
+    elif _per_modo == "Semestre":
+        _SEMS = {"1º Semestre (Jan–Jun)": ORDEM_MESES[0:6], "2º Semestre (Jul–Dez)": ORDEM_MESES[6:12]}
+        _sel_per = _SEMS[st.sidebar.selectbox("Semestre:", list(_SEMS.keys()), key="per_sem_edu")]
+    elif _per_modo == "Personalizado (de–até)":
+        _opts = _mdetect if _mdetect else list(ORDEM_MESES)
+        _de  = st.sidebar.selectbox("De:",  _opts, index=0, key="per_de_edu")
+        _ate = st.sidebar.selectbox("Até:", _opts, index=len(_opts)-1, key="per_ate_edu")
+        _i0, _i1 = ORDEM_MESES.index(_de), ORDEM_MESES.index(_ate)
+        if _i0 > _i1: _i0, _i1 = _i1, _i0
+        _sel_per = ORDEM_MESES[_i0:_i1+1]
+    if _sel_per is not None:
+        _filtrado = [m for m in _mdetect if m in _sel_per]
+        if _filtrado:
+            meses_disponiveis = _filtrado
+            st.sidebar.caption("📊 Exibindo: " + _filtrado[0] + " → " + _filtrado[-1])
+        else:
+            st.sidebar.caption("Sem lançamentos nesse período — exibindo tudo.")
+    st.sidebar.markdown("---")
     st.sidebar.subheader("Setores")
     for label, key in [("FUNDEB","FUNDEB"),
                         ("Recursos Próprios","Recursos Próprios"),
@@ -1391,95 +1424,73 @@ if df_f_raw is not None and df_r is not None:
         st.plotly_chart(fig_70, use_container_width=True, config=CONFIG_PT)
         st.markdown("---")
 
-        st.subheader("🔹 3. Execução do FUNDEB 4% (Capital × Custeio)")
+        st.subheader("🔹 3. Execução do FUNDEB 4% (ETI – Tempo Integral)")
         meta_eti_perc = 4.0
-        _base_eti = soma(
-            df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
-                ['Principal','Rendimentos','VAAT','VAAR'])],
-            meses_disponiveis
-        )
-        val_meta_eti = _base_eti * (meta_eti_perc/100)
-        _cap4  = _desp_f('154071', meses_disponiveis)   # final 1071 = Capital
-        _cus4  = _desp_f('154072', meses_disponiveis)   # final 1072 = Custeio
-        _exec4 = _cap4 + _cus4
-        _perc4 = (_exec4 / _base_eti * 100) if _base_eti > 0 else 0.0
+        _base_eti = soma(df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
+            ['Principal','Rendimentos','VAAT','VAAR'])], meses_disponiveis)
+        val_meta_eti = _base_eti * (meta_eti_perc/100)   # 4% = mínimo a investir no ETI
+        # Executado do 4%: TODAS as fontes do FUNDEB 4% liquidadas (Capital, Custeio,
+        # VAAT e VAAR). O VAAT também aparece no 70% (é pessoal), mas entra aqui também.
+        _cap4 = _desp_f('154071', meses_disponiveis)                                     # Capital
+        _cus4 = _desp_f('154072', meses_disponiveis)                                     # Custeio
+        _vat4 = _desp_f('154271', meses_disponiveis) + _desp_f('154272', meses_disponiveis)  # VAAT
+        _var4 = _desp_f('154371', meses_disponiveis) + _desp_f('154372', meses_disponiveis)  # VAAR
+        _exec4 = _cap4 + _cus4 + _vat4 + _var4
+        _perc4 = (_exec4 / val_meta_eti * 100) if val_meta_eti > 0 else 0.0
+        _SEG4 = [("Capital (154071)",       '154071', None,     "#7b241c"),
+                 ("Custeio (154072)",       '154072', None,     "#1e8449"),
+                 ("VAAT (154271/154272)",   '154271', '154272', "#2980b9"),
+                 ("VAAR (154371/154372)",   '154371', '154372', "#b9770e")]
 
         tipo_4 = st.segmented_control("Visualização:", ["Mensal","Acumulado"],
                                       default="Mensal", key="tipo_4_btn")
         if tipo_4 == "Acumulado":
             b1, b2 = st.columns(2)
-            with b1: st.metric("Base de Cálculo (Principal + Rend. + VAAT + VAAR)",
-                                formar_real(_base_eti))
-            with b2: st.metric("Executado 4% – Capital + Custeio (Liquidado)",
-                                formar_real(_exec4))
-            metric_contabil("Aplicação ETI (Mín. 4%)", _perc4, meta_eti_perc)
-
+            with b1: st.metric("Meta 4% (mínimo a investir)", formar_real(val_meta_eti))
+            with b2: st.metric("Executado 4% (Liquidado)", formar_real(_exec4))
+            metric_contabil("% do mínimo 4% executado", _perc4, 100.0)
             fig_4 = go.Figure()
             fig_4.add_trace(go.Bar(
-                x=["Receita Base\n(Principal + Rend. + VAAT + VAAR)"], y=[_base_eti],
-                name="Receita Base", marker_color="#003366",
-                text=[formar_real(_base_eti)], textposition='inside', insidetextanchor='middle',
-                hovertemplate=("<span style='color:white;'><b>Base de Cálculo do 4%</b><br>"
-                               "Valor: <b>"+formar_real(_base_eti)+"</b></span><extra></extra>")))
-            fig_4.add_trace(go.Bar(
-                x=["Executado 4%\n(Liquidado)"], y=[_cap4], name="Capital (154071)",
-                marker_color="#7b241c", text=[formar_real(_cap4) if _cap4 > 0 else ""],
+                x=["Meta 4%\n(mínimo)"], y=[val_meta_eti], name="Meta 4%",
+                marker_color="#f39c12", text=[formar_real(val_meta_eti)],
                 textposition='inside', insidetextanchor='middle',
-                hovertemplate=("<span style='color:white;'><b>Capital — Fonte 154071</b><br>"
-                               "Liquidado: <b>"+formar_real(_cap4)+"</b></span><extra></extra>")))
-            fig_4.add_trace(go.Bar(
-                x=["Executado 4%\n(Liquidado)"], y=[_cus4], name="Custeio (154072)",
-                marker_color="#1e8449", text=[formar_real(_cus4) if _cus4 > 0 else ""],
-                textposition='inside', insidetextanchor='middle',
-                hovertemplate=("<span style='color:white;'><b>Custeio — Fonte 154072</b><br>"
-                               "Liquidado: <b>"+formar_real(_cus4)+"</b></span><extra></extra>")))
+                hovertemplate=("<span style='color:white;'><b>Meta 4% (mínimo a investir)</b><br>"
+                               "Valor: <b>"+formar_real(val_meta_eti)+"</b></span><extra></extra>")))
+            for _lb, _f1, _f2, _cor in _SEG4:
+                _v = _desp_f(_f1, meses_disponiveis) + (_desp_f(_f2, meses_disponiveis) if _f2 else 0.0)
+                fig_4.add_trace(go.Bar(
+                    x=["Executado 4%\n(Liquidado)"], y=[_v], name=_lb, marker_color=_cor,
+                    text=[formar_real(_v) if _v > 0 else ""], textposition='inside',
+                    insidetextanchor='middle',
+                    hovertemplate=("<span style='color:white;'><b>"+_lb+"</b><br>"
+                                   "Liquidado: <b>"+formar_real(_v)+"</b></span><extra></extra>")))
             fig_4.add_annotation(x="Executado 4%\n(Liquidado)", y=_exec4,
-                text=f"<b>{formar_real(_exec4)}</b> ({_perc4:.2f}%)",
+                text=f"<b>{formar_real(_exec4)}</b> ({_perc4:.1f}% do mínimo)",
                 showarrow=False, yshift=14, font=dict(size=13, color="#333"))
-            fig_4.add_hline(y=val_meta_eti, line_dash="dot", line_color="#f39c12",
-                            annotation_text=f"Meta 4% = {formar_real(val_meta_eti)}",
-                            annotation_position="top left")
             fig_4.update_layout(separators=",.", barmode='stack', hoverlabel=HOVER_STYLE,
                 yaxis=dict(showticklabels=False), showlegend=True,
-                legend=dict(orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5),
-                height=440, margin=dict(b=80))
+                legend=dict(orientation="h", yanchor="bottom", y=-0.30, xanchor="center", x=0.5),
+                height=440, margin=dict(b=90))
         else:
             _meses4 = meses_disponiveis
-            _base_m4 = [soma(df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
-                            ['Principal','Rendimentos','VAAT','VAAR'])], [m]) for m in _meses4]
+            _meta_m = [soma(df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
+                        ['Principal','Rendimentos','VAAT','VAAR'])], [m])*(meta_eti_perc/100)
+                       for m in _meses4]
             fig_4 = go.Figure()
-            fig_4.add_bar(x=_meses4, y=_base_m4, name="Receita Base",
-                          marker_color="#003366", offsetgroup='rec')
-            fig_4.add_bar(x=_meses4, y=[_desp_f('154071', [m]) for m in _meses4],
-                          name="Capital (154071)", marker_color="#7b241c", offsetgroup='desp')
-            fig_4.add_bar(x=_meses4, y=[_desp_f('154072', [m]) for m in _meses4],
-                          name="Custeio (154072)", marker_color="#1e8449", offsetgroup='desp')
+            fig_4.add_bar(x=_meses4, y=_meta_m, name="Meta 4% (mín.)",
+                          marker_color="#f39c12", offsetgroup='meta')
+            for _lb, _f1, _f2, _cor in _SEG4:
+                _ym = [_desp_f(_f1, [m]) + (_desp_f(_f2, [m]) if _f2 else 0.0) for m in _meses4]
+                fig_4.add_bar(x=_meses4, y=_ym, name=_lb, marker_color=_cor, offsetgroup='exec')
             fig_4.update_layout(barmode='stack')
-            df_meta_4 = pd.DataFrame([{"Mês": m, "Meta 4%": _bm * (meta_eti_perc/100)}
-                                      for m, _bm in zip(_meses4, _base_m4)])
-            _OFFSET = 0.22; _shapes_4 = []
-            for _i, _row in df_meta_4.iterrows():
-                _meta = _row['Meta 4%']
-                _shapes_4.append(dict(type='line', xref='x', yref='y',
-                    x0=_i-_OFFSET, x1=_i+_OFFSET, y0=_meta, y1=_meta,
-                    line=dict(color='#f39c12', dash='dot', width=2)))
-                if _i < len(df_meta_4)-1:
-                    _shapes_4.append(dict(type='line', xref='x', yref='y',
-                        x0=_i+_OFFSET, x1=_i+1-_OFFSET,
-                        y0=_meta, y1=df_meta_4.loc[_i+1, 'Meta 4%'],
-                        line=dict(color='#f39c12', dash='dot', width=2)))
-            fig_4.update_layout(shapes=_shapes_4)
-            fig_4.add_trace(go.Scatter(x=[None], y=[None], mode='lines',
-                name='Meta 4% (Mensal)', showlegend=True,
-                line=dict(color='#f39c12', dash='dot', width=2)))
             fig_4.update_traces(selector=dict(type='bar'), textposition='outside',
                 hoverlabel=HOVER_STYLE,
                 hovertemplate=("<span style='color:white;'><b>%{x} — %{data.name}</b><br>"
                                "Valor: <b>R$ %{y:,.2f}</b></span><extra></extra>"))
             fig_4.update_layout(separators=",.", yaxis=dict(showticklabels=False),
                 xaxis_title=None, showlegend=True,
-                legend=dict(orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5),
-                height=460, margin=dict(b=90))
+                legend=dict(orientation="h", yanchor="bottom", y=-0.30, xanchor="center", x=0.5),
+                height=460, margin=dict(b=100))
         st.plotly_chart(fig_4, use_container_width=True, config=CONFIG_PT)
 
     # =========================================================================
