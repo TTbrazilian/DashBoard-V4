@@ -1406,7 +1406,7 @@ if df_f_raw is not None and df_r is not None:
             if _d72 > 0:
                 fig_70.add_trace(go.Bar(
                     x=["Despesas 70%\n(Liquidado)"], y=[_d72],
-                    name="FUNDEB 4% final 2 (154072)", marker_color="#1e8449",
+                    name="FUNDEB 4% final 2 (154072)", marker_color="#e67e22",
                     text=[formar_real(_d72)], textposition='inside', insidetextanchor='middle',
                     hovertemplate=("<span style='color:white;'><b>FUNDEB 4% — Fonte 154072 (entra no 70%)</b><br>"
                                    "Liquidado: <b>"+formar_real(_d72)+"</b></span><extra></extra>"),
@@ -1437,7 +1437,7 @@ if df_f_raw is not None and df_r is not None:
             _y72 = [_desp_f('154072', [m]) for m in _meses]   # final 2 entra no 70%
             if sum(_y72) > 0:
                 fig_70.add_bar(x=_meses, y=_y72, name="FUNDEB 4% final 2 (154072)",
-                               marker_color="#1e8449", offsetgroup='desp')
+                               marker_color="#e67e22", offsetgroup='desp')
             # 154071 fica fora do 70% (é investimento, não folha).
             fig_70.update_layout(barmode='stack')
             df_meta_70 = pd.DataFrame([
