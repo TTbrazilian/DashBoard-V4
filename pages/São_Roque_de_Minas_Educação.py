@@ -1154,7 +1154,7 @@ if df_f_raw is not None and df_r is not None:
         desp_f4_70    = sum(v for k, v in desp_f4.items() if k not in FUNDEB4_VAAR)
         desp_f4_vaar  = sum(v for k, v in desp_f4.items() if k in FUNDEB4_VAAR)
         desp_f4_total = desp_f4_70 + desp_f4_vaar
-        desp_70_vigente = desp_15407 + desp_f4_70   # 15407 + Principal + VAAT (VAAR fora do 70%)
+        desp_70_vigente = desp_15407   # só a folha (15407); FUNDEB 4% é investimento, não entra no 70%
         desp_30_vigente = soma(df_df_fundeb_70_30[(df_df_fundeb_70_30['Fonte']=='15403') &
                                 (df_df_fundeb_70_30['Tipo']=='Liquidado')], meses_disponiveis)
         desp_vaar_vigente = soma(df_df_fundeb_vaar[df_df_fundeb_vaar['Tipo']=='Liquidado'],
@@ -1402,17 +1402,7 @@ if df_f_raw is not None and df_r is not None:
                 hovertemplate=("<span style='color:white;'><b>FUNDEB 70% — Fonte 15407</b><br>"
                                "Liquidado: <b>"+formar_real(desp_15407)+"</b></span><extra></extra>"),
             ))
-            for _fc, _lb, _cor in FUNDEB4_FONTES:
-                if _fc in FUNDEB4_VAAR: continue   # VAAR não entra no 70%
-                _v = desp_f4.get(_fc, 0.0)
-                fig_70.add_trace(go.Bar(
-                    x=["Despesas 70%\n(Liquidado)"], y=[_v], name=_lb, marker_color=_cor,
-                    text=[formar_real(_v) if _v > 0 else ""], textposition='inside',
-                    insidetextanchor='middle',
-                    hovertemplate=("<span style='color:white;'><b>"+_lb+"</b><br>"
-                                   "Liquidado: <b>"+formar_real(_v)+"</b><br>"
-                                   "Compõe o índice dos 70%</span><extra></extra>"),
-                ))
+            # FUNDEB 4% removido do 70% (é investimento, não folha) — só o 15407 compõe o índice.
             fig_70.add_annotation(x="Despesas 70%\n(Liquidado)", y=desp_70_vigente,
                 text=f"<b>{formar_real(desp_70_vigente)}</b> ({perc_70_indice:.2f}%)",
                 showarrow=False, yshift=14, font=dict(size=13, color="#333"))
@@ -1435,10 +1425,7 @@ if df_f_raw is not None and df_r is not None:
             fig_70.add_bar(x=_meses, y=[_desp_f('15407', [m]) for m in _meses],
                            name="FUNDEB 70% (15407)",
                            marker_color=COR_DESP['FUNDEB 70% – Vigente'], offsetgroup='desp')
-            for _fc, _lb, _cor in FUNDEB4_FONTES:
-                if _fc in FUNDEB4_VAAR: continue   # VAAR não entra no 70%
-                fig_70.add_bar(x=_meses, y=[_desp_f(_fc, [m]) for m in _meses],
-                               name=_lb, marker_color=_cor, offsetgroup='desp')
+            # FUNDEB 4% removido do 70% (é investimento, não folha).
             fig_70.update_layout(barmode='stack')
             df_meta_70 = pd.DataFrame([
                 {"Mês":m, "Meta 70%": soma(df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
@@ -1487,13 +1474,13 @@ if df_f_raw is not None and df_r is not None:
         _cap4 = _desp_f('154071', meses_disponiveis)                                     # Capital
         _cus4 = _desp_f('154072', meses_disponiveis)                                     # Custeio
         _vat4 = _desp_f('154271', meses_disponiveis) + _desp_f('154272', meses_disponiveis)  # VAAT
-        _var4 = _desp_f('154371', meses_disponiveis) + _desp_f('154372', meses_disponiveis)  # VAAR
+        _var4 = _desp_f('1543', meses_disponiveis)   # VAAR — São Roque lança na fonte 1543
         _exec4 = _cap4 + _cus4 + _vat4 + _var4
         _perc4 = (_exec4 / val_meta_eti * 100) if val_meta_eti > 0 else 0.0
         _SEG4 = [("Capital (154071)",       '154071', None,     "#7b241c"),
                  ("Custeio (154072)",       '154072', None,     "#1e8449"),
                  ("VAAT (154271/154272)",   '154271', '154272', "#2980b9"),
-                 ("VAAR (154371/154372)",   '154371', '154372', "#b9770e")]
+                 ("VAAR (fonte 1543)",       '1543',   None,     "#b9770e")]
 
         tipo_4 = st.segmented_control("Visualização:", ["Mensal","Acumulado"],
                                       default="Mensal", key="tipo_4_btn")
