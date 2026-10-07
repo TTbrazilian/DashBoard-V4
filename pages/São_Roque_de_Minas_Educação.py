@@ -1154,7 +1154,8 @@ if df_f_raw is not None and df_r is not None:
         desp_f4_70    = sum(v for k, v in desp_f4.items() if k not in FUNDEB4_VAAR)
         desp_f4_vaar  = sum(v for k, v in desp_f4.items() if k in FUNDEB4_VAAR)
         desp_f4_total = desp_f4_70 + desp_f4_vaar
-        desp_70_vigente = desp_15407   # só a folha (15407); FUNDEB 4% é investimento, não entra no 70%
+        # 70% = folha (15407) + FUNDEB 4% final 2 (154072); o 154071 NÃO entra no 70%
+        desp_70_vigente = desp_15407 + _desp_f('154072', meses_disponiveis)
         desp_30_vigente = soma(df_df_fundeb_70_30[(df_df_fundeb_70_30['Fonte']=='15403') &
                                 (df_df_fundeb_70_30['Tipo']=='Liquidado')], meses_disponiveis)
         desp_vaar_vigente = soma(df_df_fundeb_vaar[df_df_fundeb_vaar['Tipo']=='Liquidado'],
@@ -1219,20 +1220,19 @@ if df_f_raw is not None and df_r is not None:
         _val_vaat      = soma(df_r_fundeb[df_r_fundeb['Subcategoria']=='VAAT'], meses_disponiveis)
         _val_vaar      = soma(df_r_fundeb[df_r_fundeb['Subcategoria']=='VAAR'], meses_disponiveis)
         _val_eti       = soma(df_r_fundeb[df_r_fundeb['Subcategoria']=='ETI'], meses_disponiveis)
-        _c1, _c2, _c3, _c4, _c5 = st.columns(5)
+        # VAAT e VAAR consolidados numa única "Receita FUNDEB" — evita confusão dos secretários.
+        _val_rec_fundeb = _val_vaat + _val_vaar
+        _c1, _c2, _c3, _c4 = st.columns(4)
         with _c1: st.metric("Principal", formar_real(_val_principal),
                              delta=f"{_val_principal/tot_rec_periodo*100:.1f}% do total" if tot_rec_periodo>0 else "—",
                              delta_color="off")
         with _c2: st.metric("Rendimentos FUNDEB", formar_real(_val_rend),
                              delta=f"{_val_rend/tot_rec_periodo*100:.1f}% do total" if tot_rec_periodo>0 else "—",
                              delta_color="off")
-        with _c3: st.metric("VAAT (entra 70% e 4%)", formar_real(_val_vaat),
-                             delta=f"{_val_vaat/tot_rec_periodo*100:.1f}% do total" if tot_rec_periodo>0 else "—",
+        with _c3: st.metric("Receita FUNDEB", formar_real(_val_rec_fundeb),
+                             delta=f"{_val_rec_fundeb/tot_rec_periodo*100:.1f}% do total" if tot_rec_periodo>0 else "—",
                              delta_color="off")
-        with _c4: st.metric("VAAR (só 4%)", formar_real(_val_vaar),
-                             delta=f"{_val_vaar/tot_rec_periodo*100:.1f}% do total" if tot_rec_periodo>0 else "—",
-                             delta_color="off")
-        with _c5: st.metric("ETI (Tempo Integral)", formar_real(_val_eti),
+        with _c4: st.metric("ETI (Tempo Integral)", formar_real(_val_eti),
                              delta=f"{_val_eti/tot_rec_periodo*100:.1f}% do total" if tot_rec_periodo>0 else "—",
                              delta_color="off")
 
@@ -1402,7 +1402,16 @@ if df_f_raw is not None and df_r is not None:
                 hovertemplate=("<span style='color:white;'><b>FUNDEB 70% — Fonte 15407</b><br>"
                                "Liquidado: <b>"+formar_real(desp_15407)+"</b></span><extra></extra>"),
             ))
-            # FUNDEB 4% removido do 70% (é investimento, não folha) — só o 15407 compõe o índice.
+            _d72 = _desp_f('154072', meses_disponiveis)   # FUNDEB 4% final 2 → entra no 70%
+            if _d72 > 0:
+                fig_70.add_trace(go.Bar(
+                    x=["Despesas 70%\n(Liquidado)"], y=[_d72],
+                    name="FUNDEB 4% final 2 (154072)", marker_color="#1e8449",
+                    text=[formar_real(_d72)], textposition='inside', insidetextanchor='middle',
+                    hovertemplate=("<span style='color:white;'><b>FUNDEB 4% — Fonte 154072 (entra no 70%)</b><br>"
+                                   "Liquidado: <b>"+formar_real(_d72)+"</b></span><extra></extra>"),
+                ))
+            # Só 15407 + 154072 compõem o índice 70%; o 154071 fica fora (é investimento).
             fig_70.add_annotation(x="Despesas 70%\n(Liquidado)", y=desp_70_vigente,
                 text=f"<b>{formar_real(desp_70_vigente)}</b> ({perc_70_indice:.2f}%)",
                 showarrow=False, yshift=14, font=dict(size=13, color="#333"))
@@ -1425,7 +1434,11 @@ if df_f_raw is not None and df_r is not None:
             fig_70.add_bar(x=_meses, y=[_desp_f('15407', [m]) for m in _meses],
                            name="FUNDEB 70% (15407)",
                            marker_color=COR_DESP['FUNDEB 70% – Vigente'], offsetgroup='desp')
-            # FUNDEB 4% removido do 70% (é investimento, não folha).
+            _y72 = [_desp_f('154072', [m]) for m in _meses]   # final 2 entra no 70%
+            if sum(_y72) > 0:
+                fig_70.add_bar(x=_meses, y=_y72, name="FUNDEB 4% final 2 (154072)",
+                               marker_color="#1e8449", offsetgroup='desp')
+            # 154071 fica fora do 70% (é investimento, não folha).
             fig_70.update_layout(barmode='stack')
             df_meta_70 = pd.DataFrame([
                 {"Mês":m, "Meta 70%": soma(df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
@@ -1469,18 +1482,39 @@ if df_f_raw is not None and df_r is not None:
         _base_eti = soma(df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
             ['Principal','Rendimentos','VAAT','VAAR'])], meses_disponiveis)
         val_meta_eti = _base_eti * (meta_eti_perc/100)   # 4% = mínimo a investir no ETI
-        # Executado do 4%: TODAS as fontes do FUNDEB 4% liquidadas (Capital, Custeio,
-        # VAAT e VAAR). O VAAT também aparece no 70% (é pessoal), mas entra aqui também.
-        _cap4 = _desp_f('154071', meses_disponiveis)                                     # Capital
-        _cus4 = _desp_f('154072', meses_disponiveis)                                     # Custeio
-        _vat4 = _desp_f('154271', meses_disponiveis) + _desp_f('154272', meses_disponiveis)  # VAAT
-        _var4 = _desp_f('1543', meses_disponiveis)   # VAAR — São Roque lança na fonte 1543
-        _exec4 = _cap4 + _cus4 + _vat4 + _var4
+        # Executado do 4% (ETI). Capital × Custeio é definido pelo ELEMENTO (natureza),
+        # NÃO pela fonte: o 154071 pode ser capital OU custeio (em São Roque foi custeio,
+        # Serviços de Terceiros PJ). VAAR NÃO entra na execução do 4%.
+        _CAP4_ELEM = ['Obras e Instalações', 'Equipamentos e Materiais Permanentes']
+        def _desp_4pct_nat(fontes, natureza, meses):
+            """Soma Liquidado (Fichas) das fontes do 4% ETI, separando Capital/Custeio pelo Elemento."""
+            if df_f_raw is None or 'Fonte' not in getattr(df_f_raw, 'columns', []):
+                return 0.0
+            _lc = [f"{m}_Liquidado" for m in meses if f"{m}_Liquidado" in df_f_raw.columns]
+            if not _lc:
+                return 0.0
+            _sub = df_f_raw[df_f_raw['Fonte'].astype(str).str.strip().isin(
+                [str(f) for f in fontes])].copy()
+            if not len(_sub):
+                return 0.0
+            _elem = (_sub['Elemento'] if 'Elemento' in _sub.columns
+                     else pd.Series([''] * len(_sub), index=_sub.index))
+            _is_cap = _elem.astype(str).str.strip().isin(_CAP4_ELEM)
+            _sub = _sub[_is_cap] if natureza == 'Capital' else _sub[~_is_cap]
+            return float(_sub[_lc].sum().sum()) if len(_sub) else 0.0
+        def _seg4_val(key, meses):
+            if key == 'cap': return _desp_4pct_nat(['154071', '154072'], 'Capital', meses)
+            if key == 'cus': return _desp_4pct_nat(['154071', '154072'], 'Custeio', meses)
+            if key == 'vat': return _desp_f('154271', meses) + _desp_f('154272', meses)
+            return 0.0
+        _cap4 = _seg4_val('cap', meses_disponiveis)   # Capital (Equip./Obras)
+        _cus4 = _seg4_val('cus', meses_disponiveis)   # Custeio (Serviços PJ, Material, etc.)
+        _vat4 = _seg4_val('vat', meses_disponiveis)   # VAAT
+        _exec4 = _cap4 + _cus4 + _vat4
         _perc4 = (_exec4 / val_meta_eti * 100) if val_meta_eti > 0 else 0.0
-        _SEG4 = [("Capital (154071)",       '154071', None,     "#7b241c"),
-                 ("Custeio (154072)",       '154072', None,     "#1e8449"),
-                 ("VAAT (154271/154272)",   '154271', '154272', "#2980b9"),
-                 ("VAAR (fonte 1543)",       '1543',   None,     "#b9770e")]
+        _SEG4 = [("Capital (Equip./Obras)",  'cap', "#7b241c"),
+                 ("Custeio (Serviços/Mat.)", 'cus', "#1e8449"),
+                 ("VAAT (154271/154272)",    'vat', "#2980b9")]
 
         tipo_4 = st.segmented_control("Visualização:", ["Mensal","Acumulado"],
                                       default="Mensal", key="tipo_4_btn")
@@ -1496,8 +1530,8 @@ if df_f_raw is not None and df_r is not None:
                 textposition='inside', insidetextanchor='middle',
                 hovertemplate=("<span style='color:white;'><b>Meta 4% (mínimo a investir)</b><br>"
                                "Valor: <b>"+formar_real(val_meta_eti)+"</b></span><extra></extra>")))
-            for _lb, _f1, _f2, _cor in _SEG4:
-                _v = _desp_f(_f1, meses_disponiveis) + (_desp_f(_f2, meses_disponiveis) if _f2 else 0.0)
+            for _lb, _key, _cor in _SEG4:
+                _v = _seg4_val(_key, meses_disponiveis)
                 fig_4.add_trace(go.Bar(
                     x=["Executado 4%\n(Liquidado)"], y=[_v], name=_lb, marker_color=_cor,
                     text=[formar_real(_v) if _v > 0 else ""], textposition='inside',
@@ -1519,8 +1553,8 @@ if df_f_raw is not None and df_r is not None:
             fig_4 = go.Figure()
             fig_4.add_bar(x=_meses4, y=_meta_m, name="Meta 4% (mín.)",
                           marker_color="#f39c12", offsetgroup='meta')
-            for _lb, _f1, _f2, _cor in _SEG4:
-                _ym = [_desp_f(_f1, [m]) + (_desp_f(_f2, [m]) if _f2 else 0.0) for m in _meses4]
+            for _lb, _key, _cor in _SEG4:
+                _ym = [_seg4_val(_key, [m]) for m in _meses4]
                 fig_4.add_bar(x=_meses4, y=_ym, name=_lb, marker_color=_cor, offsetgroup='exec')
             fig_4.update_layout(barmode='stack')
             fig_4.update_traces(selector=dict(type='bar'), textposition='outside',
