@@ -94,8 +94,8 @@ COR_DESP = {
     'FUNDEB 30% – Vigente': '#ff1744',
     'FUNDEB 4% Principal (154071)': '#7b241c',
     'FUNDEB 4% Principal (154072)': '#cb4335',
-    'FUNDEB 4% VAAT (154271)': '#1e8449',
-    'FUNDEB 4% VAAT (154272)': '#28b463',
+    'FUNDEB 4% VAAT (154271)': '#d35400',
+    'FUNDEB 4% VAAT (154272)': '#e67e22',
     'FUNDEB 4% VAAR (154371)': '#b9770e',
     'FUNDEB 4% VAAR (154372)': '#f1c40f',
 }
@@ -103,8 +103,8 @@ COR_DESP = {
 FUNDEB4_FONTES = [
     ('154071', 'FUNDEB 4% Principal (154071)', '#7b241c'),
     ('154072', 'FUNDEB 4% Principal (154072)', '#cb4335'),
-    ('154271', 'FUNDEB 4% VAAT (154271)',      '#1e8449'),
-    ('154272', 'FUNDEB 4% VAAT (154272)',      '#28b463'),
+    ('154271', 'FUNDEB 4% VAAT (154271)',      '#d35400'),
+    ('154272', 'FUNDEB 4% VAAT (154272)',      '#e67e22'),
     ('154371', 'FUNDEB 4% VAAR (154371)',      '#b9770e'),
     ('154372', 'FUNDEB 4% VAAR (154372)',      '#f1c40f'),
 ]
