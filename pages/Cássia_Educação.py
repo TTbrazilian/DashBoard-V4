@@ -1497,39 +1497,39 @@ if df_f_raw is not None and df_r is not None:
         _base_eti = soma(df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
             ['Principal','Rendimentos','VAAT','VAAR'])], meses_disponiveis)
         val_meta_eti = _base_eti * (meta_eti_perc/100)   # 4% = mínimo a investir no ETI
-        # Executado do 4% (ETI). Capital × Custeio é definido pelo ELEMENTO (natureza),
-        # NÃO pela fonte: o 154071 pode ser capital OU custeio (em Cássia foi custeio).
-        # Executado = final 71 + final 72. VAAR NÃO entra na execução do 4%.
-        _CAP4_ELEM = ['Obras e Instalações', 'Equipamentos e Materiais Permanentes']
-        def _desp_4pct_nat(fontes, natureza, meses):
-            """Soma Liquidado (Fichas) das fontes do 4% ETI, separando Capital/Custeio pelo Elemento."""
+        # Executado do 4% (ETI) mostrado por CATEGORIA DA DESPESA (como o recurso foi
+        # gasto): Folha, Custeio e Capital — NÃO pela fonte (VAAT/VAAR). A classificação
+        # é pelo ELEMENTO. Fontes do 4%: 154071/154072/154271/154272 (VAAR fora).
+        _CAP4_ELEM   = ['Obras e Instalações', 'Equipamentos e Materiais Permanentes']
+        _FONTES_4PCT = ['154071', '154072', '154271', '154272']
+        def _seg4_val(categoria, meses):
+            """Soma Liquidado (Fichas) das fontes do 4%, por categoria da despesa
+            (Folha/Custeio/Capital), classificada pelo Elemento."""
             if df_f_raw is None or 'Fonte' not in getattr(df_f_raw, 'columns', []):
                 return 0.0
             _lc = [f"{m}_Liquidado" for m in meses if f"{m}_Liquidado" in df_f_raw.columns]
             if not _lc:
                 return 0.0
-            _sub = df_f_raw[df_f_raw['Fonte'].astype(str).str.strip().isin(
-                [str(f) for f in fontes])].copy()
+            _sub = df_f_raw[df_f_raw['Fonte'].astype(str).str.strip().isin(_FONTES_4PCT)].copy()
             if not len(_sub):
                 return 0.0
-            _elem = (_sub['Elemento'] if 'Elemento' in _sub.columns
-                     else pd.Series([''] * len(_sub), index=_sub.index))
-            _is_cap = _elem.astype(str).str.strip().isin(_CAP4_ELEM)
-            _sub = _sub[_is_cap] if natureza == 'Capital' else _sub[~_is_cap]
-            return float(_sub[_lc].sum().sum()) if len(_sub) else 0.0
-        def _seg4_val(key, meses):
-            if key == 'cap': return _desp_4pct_nat(['154071', '154072'], 'Capital', meses)
-            if key == 'cus': return _desp_4pct_nat(['154071', '154072'], 'Custeio', meses)
-            if key == 'vat': return _desp_f('154271', meses) + _desp_f('154272', meses)
-            return 0.0
-        _cap4 = _seg4_val('cap', meses_disponiveis)   # Capital (Equip./Obras)
-        _cus4 = _seg4_val('cus', meses_disponiveis)   # Custeio (Serviços PJ, Material, etc.)
-        _vat4 = _seg4_val('vat', meses_disponiveis)   # VAAT
-        _exec4 = _cap4 + _cus4 + _vat4
+            _el = (_sub['Elemento'] if 'Elemento' in _sub.columns
+                   else pd.Series([''] * len(_sub), index=_sub.index)).astype(str).str.strip()
+            _is_cap   = _el.isin(_CAP4_ELEM)
+            _is_folha = _el.isin(_REL_FOLHA)
+            if categoria == 'Capital':   _msk = _is_cap
+            elif categoria == 'Folha':   _msk = _is_folha & ~_is_cap
+            else:                        _msk = ~_is_cap & ~_is_folha   # Custeio
+            _sel = _sub[_msk]
+            return float(_sel[_lc].sum().sum()) if len(_sel) else 0.0
+        _folha4 = _seg4_val('Folha',   meses_disponiveis)
+        _cus4   = _seg4_val('Custeio', meses_disponiveis)
+        _cap4   = _seg4_val('Capital', meses_disponiveis)
+        _exec4 = _folha4 + _cus4 + _cap4
         _perc4 = (_exec4 / val_meta_eti * 100) if val_meta_eti > 0 else 0.0
-        _SEG4 = [("Capital (Equip./Obras)",  'cap', "#7b241c"),
-                 ("Custeio (Serviços/Mat.)", 'cus', "#1e8449"),
-                 ("VAAT (154271/154272)",    'vat', "#2980b9")]
+        _SEG4 = [("Folha",   'Folha',   "#c0392b"),
+                 ("Custeio", 'Custeio', "#e67e22"),
+                 ("Capital", 'Capital', "#8e44ad")]
 
         tipo_4 = st.segmented_control("Visualização:", ["Mensal","Acumulado"],
                                       default="Mensal", key="tipo_4_btn")
