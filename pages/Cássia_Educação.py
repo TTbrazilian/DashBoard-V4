@@ -1154,8 +1154,13 @@ if df_f_raw is not None and df_r is not None:
         desp_f4_70    = sum(v for k, v in desp_f4.items() if k not in FUNDEB4_VAAR)
         desp_f4_vaar  = sum(v for k, v in desp_f4.items() if k in FUNDEB4_VAAR)
         desp_f4_total = desp_f4_70 + desp_f4_vaar
-        # 70% = folha (15407) + FUNDEB 4% final 2 (154072, dep. pessoal); 154071 NÃO entra no 70%
-        desp_70_vigente = desp_15407 + _desp_f('154072', meses_disponiveis)
+        # 70% (folha) = 15407 + VAAT base (15427) + 4% folha final-2 (154072 Principal + 154272 VAAT).
+        # VAAR NÃO entra no 70%; as fontes final-1 (154071/154271) também não (custeio/capital).
+        _FOLHA_70_EXTRA = ['15427', '154072', '154272']
+        def _folha70_extra(meses):
+            return sum(_desp_f(_f, meses) for _f in _FOLHA_70_EXTRA)
+        desp_70_folha4  = _folha70_extra(meses_disponiveis)
+        desp_70_vigente = desp_15407 + desp_70_folha4
         desp_30_vigente = _desp_f('15403', meses_disponiveis)
         desp_eti_vigente = soma(df_df_fundeb_eti[df_df_fundeb_eti['Tipo']=='Liquidado'],
                                 meses_disponiveis)
@@ -1414,17 +1419,17 @@ if df_f_raw is not None and df_r is not None:
                 hovertemplate=("<span style='color:white;'><b>FUNDEB 70% — Fonte 15407</b><br>"
                                "Liquidado: <b>"+formar_real(desp_15407)+"</b></span><extra></extra>"),
             ))
-            _d72 = _desp_f('154072', meses_disponiveis)   # FUNDEB 4% final 2 → entra no 70%
-            if _d72 > 0:
+            if desp_70_folha4 > 0:
                 fig_70.add_trace(go.Bar(
-                    x=["Despesas 70%\n(Liquidado)"], y=[_d72],
-                    name="FUNDEB 4% final 2 (154072)", marker_color="#e67e22",
-                    text=[formar_real(_d72)], textposition='inside', insidetextanchor='middle',
-                    hovertemplate=("<span style='color:white;'><b>FUNDEB 4% — Fonte 154072 (dep. pessoal)</b><br>"
-                                   "Liquidado: <b>"+formar_real(_d72)+"</b><br>"
+                    x=["Despesas 70%\n(Liquidado)"], y=[desp_70_folha4],
+                    name="Folha complementar 4% (154072 + 154272)", marker_color="#e67e22",
+                    text=[formar_real(desp_70_folha4)], textposition='inside', insidetextanchor='middle',
+                    hovertemplate=("<span style='color:white;'><b>Folha complementar 4% (final 2)</b><br>"
+                                   "154072 (Principal) + 154272 (VAAT) + 15427<br>"
+                                   "Liquidado: <b>"+formar_real(desp_70_folha4)+"</b><br>"
                                    "Compõe o índice dos 70%</span><extra></extra>"),
                 ))
-            # 154071 fica fora do 70% (não é folha, é custeio/investimento).
+            # Fontes final-1 (154071/154271) e o VAAR ficam fora do 70% (custeio/capital).
             fig_70.add_annotation(x="Despesas 70%\n(Liquidado)", y=desp_70_vigente,
                 text=f"<b>{formar_real(desp_70_vigente)}</b> ({perc_70_indice:.2f}%)",
                 showarrow=False, yshift=14, font=dict(size=13, color="#333"))
@@ -1447,11 +1452,11 @@ if df_f_raw is not None and df_r is not None:
             fig_70.add_bar(x=_meses, y=[_desp_f('15407', [m]) for m in _meses],
                            name="FUNDEB 70% (15407)",
                            marker_color=COR_DESP['FUNDEB 70% – Vigente'], offsetgroup='desp')
-            _y72 = [_desp_f('154072', [m]) for m in _meses]   # final 2 entra no 70%
-            if sum(_y72) > 0:
-                fig_70.add_bar(x=_meses, y=_y72, name="FUNDEB 4% final 2 (154072)",
+            _yf4 = [_folha70_extra([m]) for m in _meses]   # folha complementar final-2
+            if sum(_yf4) > 0:
+                fig_70.add_bar(x=_meses, y=_yf4, name="Folha complementar 4% (154072 + 154272)",
                                marker_color="#e67e22", offsetgroup='desp')
-            # 154071 fica fora do 70%.
+            # Fontes final-1 e VAAR ficam fora do 70%.
             fig_70.update_layout(barmode='stack')
             df_meta_70 = pd.DataFrame([
                 {"Mês":m, "Meta 70%": soma(df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
@@ -1500,28 +1505,31 @@ if df_f_raw is not None and df_r is not None:
         # Executado do 4% (ETI) mostrado por CATEGORIA DA DESPESA (como o recurso foi
         # gasto): Folha, Custeio e Capital — NÃO pela fonte (VAAT/VAAR). A classificação
         # é pelo ELEMENTO. Fontes do 4%: 154071/154072/154271/154272 (VAAR fora).
-        _CAP4_ELEM   = ['Obras e Instalações', 'Equipamentos e Materiais Permanentes']
-        _FONTES_4PCT = ['154071', '154072', '154271', '154272']
+        # Classificação conforme a especificação das fontes:
+        #  • Folha            = fontes de final 2 (154072 + 154272 + 154372)
+        #  • Custeio/Capital  = fontes de final 1 (154071 + 154271 + 154371),
+        #                       divididas pelo ELEMENTO da despesa.
+        _CAP4_ELEM    = ['Obras e Instalações', 'Equipamentos e Materiais Permanentes']
+        _FONTES_FOLHA = ['154072', '154272', '154372']   # final 2 → Folha
+        _FONTES_CUSCAP = ['154071', '154271', '154371']  # final 1 → Custeio/Capital
         def _seg4_val(categoria, meses):
             """Soma Liquidado (Fichas) das fontes do 4%, por categoria da despesa
-            (Folha/Custeio/Capital), classificada pelo Elemento."""
+            (Folha / Custeio / Capital) — mostra COMO o recurso foi gasto."""
             if df_f_raw is None or 'Fonte' not in getattr(df_f_raw, 'columns', []):
                 return 0.0
             _lc = [f"{m}_Liquidado" for m in meses if f"{m}_Liquidado" in df_f_raw.columns]
             if not _lc:
                 return 0.0
-            _sub = df_f_raw[df_f_raw['Fonte'].astype(str).str.strip().isin(_FONTES_4PCT)].copy()
+            _fontes = _FONTES_FOLHA if categoria == 'Folha' else _FONTES_CUSCAP
+            _sub = df_f_raw[df_f_raw['Fonte'].astype(str).str.strip().isin(_fontes)].copy()
             if not len(_sub):
                 return 0.0
-            _el = (_sub['Elemento'] if 'Elemento' in _sub.columns
-                   else pd.Series([''] * len(_sub), index=_sub.index)).astype(str).str.strip()
-            _is_cap   = _el.isin(_CAP4_ELEM)
-            _is_folha = _el.isin(_REL_FOLHA)
-            if categoria == 'Capital':   _msk = _is_cap
-            elif categoria == 'Folha':   _msk = _is_folha & ~_is_cap
-            else:                        _msk = ~_is_cap & ~_is_folha   # Custeio
-            _sel = _sub[_msk]
-            return float(_sel[_lc].sum().sum()) if len(_sel) else 0.0
+            if categoria != 'Folha':
+                _el = (_sub['Elemento'] if 'Elemento' in _sub.columns
+                       else pd.Series([''] * len(_sub), index=_sub.index)).astype(str).str.strip()
+                _is_cap = _el.isin(_CAP4_ELEM)
+                _sub = _sub[_is_cap] if categoria == 'Capital' else _sub[~_is_cap]
+            return float(_sub[_lc].sum().sum()) if len(_sub) else 0.0
         _folha4 = _seg4_val('Folha',   meses_disponiveis)
         _cus4   = _seg4_val('Custeio', meses_disponiveis)
         _cap4   = _seg4_val('Capital', meses_disponiveis)
