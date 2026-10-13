@@ -1478,18 +1478,39 @@ if df_f_raw is not None and df_r is not None:
         _base_eti = soma(df_r_fundeb[df_r_fundeb['Subcategoria'].isin(
             ['Principal','Rendimentos','VAAT','VAAR'])], meses_disponiveis)
         val_meta_eti = _base_eti * (meta_eti_perc/100)   # 4% = mínimo a investir no ETI
-        # Executado do 4%: TODAS as fontes do FUNDEB 4% liquidadas (Capital, Custeio,
-        # VAAT e VAAR). O VAAT também aparece no 70% (é pessoal), mas entra aqui também.
-        _cap4 = _desp_f('154071', meses_disponiveis)                                     # Capital
-        _cus4 = _desp_f('154072', meses_disponiveis)                                     # Custeio
-        _vat4 = _desp_f('154271', meses_disponiveis) + _desp_f('154272', meses_disponiveis)  # VAAT
-        _var4 = _desp_f('154371', meses_disponiveis) + _desp_f('154372', meses_disponiveis)  # VAAR
-        _exec4 = _cap4 + _cus4 + _vat4 + _var4
+        # Execução do 4% por CATEGORIA DA DESPESA (como o recurso foi gasto):
+        #  • Folha            = fontes de final 2 (154072 + 154272 + 154372)
+        #  • Custeio/Capital  = fontes de final 1 (154071 + 154271 + 154371),
+        #                       divididas pelo ELEMENTO da despesa.
+        _CAP4_ELEM     = ['Obras e Instalações', 'Equipamentos e Materiais Permanentes']
+        _FONTES_FOLHA  = ['154072', '154272', '154372']   # final 2 -> Folha
+        _FONTES_CUSCAP = ['154071', '154271', '154371']   # final 1 -> Custeio/Capital
+        def _seg4_val(categoria, meses):
+            """Soma Liquidado (Fichas) das fontes do 4%, por categoria da despesa
+            (Folha / Custeio / Capital) - mostra COMO o recurso foi gasto."""
+            if df_f_raw is None or 'Fonte' not in getattr(df_f_raw, 'columns', []):
+                return 0.0
+            _lc = [f"{m}_Liquidado" for m in meses if f"{m}_Liquidado" in df_f_raw.columns]
+            if not _lc:
+                return 0.0
+            _fontes = _FONTES_FOLHA if categoria == 'Folha' else _FONTES_CUSCAP
+            _sub = df_f_raw[df_f_raw['Fonte'].astype(str).str.strip().isin(_fontes)].copy()
+            if not len(_sub):
+                return 0.0
+            if categoria != 'Folha':
+                _el = (_sub['Elemento'] if 'Elemento' in _sub.columns
+                       else pd.Series([''] * len(_sub), index=_sub.index)).astype(str).str.strip()
+                _is_cap = _el.isin(_CAP4_ELEM)
+                _sub = _sub[_is_cap] if categoria == 'Capital' else _sub[~_is_cap]
+            return float(_sub[_lc].sum().sum()) if len(_sub) else 0.0
+        _folha4 = _seg4_val('Folha',   meses_disponiveis)
+        _cus4   = _seg4_val('Custeio', meses_disponiveis)
+        _cap4   = _seg4_val('Capital', meses_disponiveis)
+        _exec4 = _folha4 + _cus4 + _cap4
         _perc4 = (_exec4 / val_meta_eti * 100) if val_meta_eti > 0 else 0.0
-        _SEG4 = [("Capital (154071)",       '154071', None,     "#7b241c"),
-                 ("Custeio (154072)",       '154072', None,     "#1e8449"),
-                 ("VAAT (154271/154272)",   '154271', '154272', "#2980b9"),
-                 ("VAAR (154371/154372)",   '154371', '154372', "#b9770e")]
+        _SEG4 = [("Folha",   'Folha',   "#c0392b"),
+                 ("Custeio", 'Custeio', "#e67e22"),
+                 ("Capital", 'Capital', "#8e44ad")]
 
         tipo_4 = st.segmented_control("Visualização:", ["Mensal","Acumulado"],
                                       default="Mensal", key="tipo_4_btn")
@@ -1501,12 +1522,12 @@ if df_f_raw is not None and df_r is not None:
             fig_4 = go.Figure()
             fig_4.add_trace(go.Bar(
                 x=["Meta 4%\n(mínimo)"], y=[val_meta_eti], name="Meta 4%",
-                marker_color="#f39c12", text=[formar_real(val_meta_eti)],
+                marker_color="#2563eb", text=[formar_real(val_meta_eti)],
                 textposition='inside', insidetextanchor='middle',
                 hovertemplate=("<span style='color:white;'><b>Meta 4% (mínimo a investir)</b><br>"
                                "Valor: <b>"+formar_real(val_meta_eti)+"</b></span><extra></extra>")))
-            for _lb, _f1, _f2, _cor in _SEG4:
-                _v = _desp_f(_f1, meses_disponiveis) + (_desp_f(_f2, meses_disponiveis) if _f2 else 0.0)
+            for _lb, _key, _cor in _SEG4:
+                _v = _seg4_val(_key, meses_disponiveis)
                 fig_4.add_trace(go.Bar(
                     x=["Executado 4%\n(Liquidado)"], y=[_v], name=_lb, marker_color=_cor,
                     text=[formar_real(_v) if _v > 0 else ""], textposition='inside',
@@ -1527,9 +1548,9 @@ if df_f_raw is not None and df_r is not None:
                        for m in _meses4]
             fig_4 = go.Figure()
             fig_4.add_bar(x=_meses4, y=_meta_m, name="Meta 4% (mín.)",
-                          marker_color="#f39c12", offsetgroup='meta')
-            for _lb, _f1, _f2, _cor in _SEG4:
-                _ym = [_desp_f(_f1, [m]) + (_desp_f(_f2, [m]) if _f2 else 0.0) for m in _meses4]
+                          marker_color="#2563eb", offsetgroup='meta')
+            for _lb, _key, _cor in _SEG4:
+                _ym = [_seg4_val(_key, [m]) for m in _meses4]
                 fig_4.add_bar(x=_meses4, y=_ym, name=_lb, marker_color=_cor, offsetgroup='exec')
             fig_4.update_layout(barmode='stack')
             fig_4.update_traces(selector=dict(type='bar'), textposition='outside',

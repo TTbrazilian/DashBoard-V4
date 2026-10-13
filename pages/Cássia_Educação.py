@@ -1549,7 +1549,7 @@ if df_f_raw is not None and df_r is not None:
             fig_4 = go.Figure()
             fig_4.add_trace(go.Bar(
                 x=["Meta 4%\n(mínimo)"], y=[val_meta_eti], name="Meta 4%",
-                marker_color="#f39c12", text=[formar_real(val_meta_eti)],
+                marker_color="#2563eb", text=[formar_real(val_meta_eti)],
                 textposition='inside', insidetextanchor='middle',
                 hovertemplate=("<span style='color:white;'><b>Meta 4% (mínimo a investir)</b><br>"
                                "Valor: <b>"+formar_real(val_meta_eti)+"</b></span><extra></extra>")))
@@ -1575,7 +1575,7 @@ if df_f_raw is not None and df_r is not None:
                        for m in _meses4]
             fig_4 = go.Figure()
             fig_4.add_bar(x=_meses4, y=_meta_m, name="Meta 4% (mín.)",
-                          marker_color="#f39c12", offsetgroup='meta')
+                          marker_color="#2563eb", offsetgroup='meta')
             for _lb, _key, _cor in _SEG4:
                 _ym = [_seg4_val(_key, [m]) for m in _meses4]
                 fig_4.add_bar(x=_meses4, y=_ym, name=_lb, marker_color=_cor, offsetgroup='exec')
