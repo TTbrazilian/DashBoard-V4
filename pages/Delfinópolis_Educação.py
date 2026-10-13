@@ -1817,7 +1817,7 @@ if df_f_raw is not None and df_r is not None:
                     "Total descontado: <b>%{customdata[5]}</b></span><extra></extra>"
                 ),
             ))
-            fig_meta.add_hline(y=tot_rec_base*0.25, line_dash="dash", line_color="#f39c12",
+            fig_meta.add_hline(y=tot_rec_base*0.25, line_dash="dash", line_color="#2563eb",
                                annotation_text=f"Meta 25% = {formar_real(tot_rec_base*0.25)}",
                                annotation_position="top left")
             fig_meta.update_layout(separators=",.", barmode='stack', hoverlabel=HOVER_STYLE,
@@ -1875,16 +1875,16 @@ if df_f_raw is not None and df_r is not None:
                 _meta = _row['Meta 25%']
                 _shapes_25.append(dict(type='line', xref='x', yref='y',
                     x0=_i-_OFFSET, x1=_i+_OFFSET, y0=_meta, y1=_meta,
-                    line=dict(color='#f39c12', dash='dash', width=2)))
+                    line=dict(color='#2563eb', dash='dash', width=2)))
                 if _i < len(df_linha)-1:
                     _shapes_25.append(dict(type='line', xref='x', yref='y',
                         x0=_i+_OFFSET, x1=_i+1-_OFFSET,
                         y0=_meta, y1=df_linha.loc[_i+1,'Meta 25%'],
-                        line=dict(color='#f39c12', dash='dash', width=2)))
+                        line=dict(color='#2563eb', dash='dash', width=2)))
             fig_meta.update_layout(shapes=_shapes_25)
             fig_meta.add_trace(go.Scatter(x=[None], y=[None], mode='lines',
                 name='Meta 25% (Mensal)', showlegend=True,
-                line=dict(color='#f39c12', dash='dash', width=2)))
+                line=dict(color='#2563eb', dash='dash', width=2)))
             fig_meta.update_layout(
                 separators=",.", yaxis=dict(showticklabels=False), showlegend=True,
                 legend=dict(orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5)

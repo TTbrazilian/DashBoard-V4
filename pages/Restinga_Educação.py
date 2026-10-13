@@ -1836,7 +1836,7 @@ if df_f_raw is not None and df_r is not None:
                                "Outras fontes (anos ant.): %{customdata[6]}"
                                "</span><extra></extra>"),
             ))
-            fig_meta.add_hline(y=tot_rec_base*0.25, line_dash="dash", line_color="#f39c12",
+            fig_meta.add_hline(y=tot_rec_base*0.25, line_dash="dash", line_color="#2563eb",
                                annotation_text=f"Meta 25% = {formar_real(tot_rec_base*0.25)}",
                                annotation_position="top left")
             fig_meta.update_layout(separators=",.", barmode='stack', hoverlabel=HOVER_STYLE,
@@ -1891,14 +1891,14 @@ if df_f_raw is not None and df_r is not None:
             for i, _mv in enumerate(metas_25):
                 fig_meta.add_shape(type='line', xref='x', yref='y',
                     x0=i-_OFFSET, x1=i+_OFFSET, y0=_mv, y1=_mv,
-                    line=dict(color='#f39c12', dash='dash', width=2))
+                    line=dict(color='#2563eb', dash='dash', width=2))
                 if i < len(metas_25)-1:
                     fig_meta.add_shape(type='line', xref='x', yref='y',
                         x0=i+_OFFSET, x1=(i+1)-_OFFSET, y0=_mv, y1=metas_25[i+1],
-                        line=dict(color='#f39c12', dash='dash', width=2))
+                        line=dict(color='#2563eb', dash='dash', width=2))
             fig_meta.add_trace(go.Scatter(
                 x=[None], y=[None], mode='lines', name='Meta 25% (Mensal)',
-                line=dict(color='#f39c12', dash='dash')
+                line=dict(color='#2563eb', dash='dash')
             ))
             fig_meta.update_layout(
                 separators=",.", yaxis=dict(showticklabels=False), showlegend=True,

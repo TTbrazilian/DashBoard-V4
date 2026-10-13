@@ -1835,7 +1835,7 @@ if df_f_raw is not None and df_r is not None:
                                "Estágio: %{customdata[2]}<br>Valor: <b>%{customdata[0]}</b><br>"
                                "% do esforço: %{customdata[1]}</span><extra></extra>"),
             ))
-            fig_meta.add_hline(y=tot_rec_base*0.25, line_dash="dash", line_color="#f39c12",
+            fig_meta.add_hline(y=tot_rec_base*0.25, line_dash="dash", line_color="#2563eb",
                                annotation_text=f"Meta 25% = {formar_real(tot_rec_base*0.25)}",
                                annotation_position="top left")
             fig_meta.update_layout(separators=",.", barmode='stack', hoverlabel=HOVER_STYLE,
@@ -1888,7 +1888,7 @@ if df_f_raw is not None and df_r is not None:
             fig_meta.add_trace(go.Scatter(
                 x=df_linha['Mês'], y=df_linha['Meta 25%'],
                 mode='lines+markers', name='Meta 25% (Mensal)',
-                line=dict(color='#f39c12', dash='dash')
+                line=dict(color='#2563eb', dash='dash')
             ))
             fig_meta.update_layout(
                 separators=",.", yaxis=dict(showticklabels=False), showlegend=True,
