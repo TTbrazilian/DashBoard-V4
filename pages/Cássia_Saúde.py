@@ -619,6 +619,39 @@ if df_raw is not None:
 
     meses_disp = _detectar_meses(df_raw, df_df)
 
+    # ── FILTRO DE PERÍODO (regra universal iG2P) ─────────────────────────────
+    #   Restringe meses_disp → todos os gráficos somam sobre ele, então a página
+    #   inteira passa a respeitar o período escolhido.
+    st.sidebar.subheader("📆 Período de Análise")
+    _per_modo = st.sidebar.radio("Filtrar por:",
+        ["Todo o período", "Bimestre", "Semestre", "Personalizado (de–até)"],
+        key="per_modo_sau")
+    _mdetect = [m for m in MESES_ORDEM if m in meses_disp]
+    _sel_per = None
+    if _per_modo == "Bimestre":
+        _BIMS = {"1º Bim (Jan–Fev)": MESES_ORDEM[0:2], "2º Bim (Mar–Abr)": MESES_ORDEM[2:4],
+                 "3º Bim (Mai–Jun)": MESES_ORDEM[4:6], "4º Bim (Jul–Ago)": MESES_ORDEM[6:8],
+                 "5º Bim (Set–Out)": MESES_ORDEM[8:10], "6º Bim (Nov–Dez)": MESES_ORDEM[10:12]}
+        _sel_per = _BIMS[st.sidebar.selectbox("Bimestre:", list(_BIMS.keys()), key="per_bim_sau")]
+    elif _per_modo == "Semestre":
+        _SEMS = {"1º Semestre (Jan–Jun)": MESES_ORDEM[0:6], "2º Semestre (Jul–Dez)": MESES_ORDEM[6:12]}
+        _sel_per = _SEMS[st.sidebar.selectbox("Semestre:", list(_SEMS.keys()), key="per_sem_sau")]
+    elif _per_modo == "Personalizado (de–até)":
+        _opts = _mdetect if _mdetect else list(MESES_ORDEM)
+        _de  = st.sidebar.selectbox("De:",  _opts, index=0, key="per_de_sau")
+        _ate = st.sidebar.selectbox("Até:", _opts, index=len(_opts)-1, key="per_ate_sau")
+        _i0, _i1 = MESES_ORDEM.index(_de), MESES_ORDEM.index(_ate)
+        if _i0 > _i1: _i0, _i1 = _i1, _i0
+        _sel_per = MESES_ORDEM[_i0:_i1+1]
+    if _sel_per is not None:
+        _filtrado = [m for m in _mdetect if m in _sel_per]
+        if _filtrado:
+            meses_disp = _filtrado
+            st.sidebar.caption("📊 Exibindo: " + _filtrado[0] + " → " + _filtrado[-1])
+        else:
+            st.sidebar.caption("Sem lançamentos nesse período — exibindo tudo.")
+    st.sidebar.markdown("---")
+
     # ── RELATÓRIO PDF (regra geral iG2P) ──────────────────────────────────────
     try:
         _mun_rel = os.path.splitext(os.path.basename(__file__))[0].replace('_Saúde', '').replace('_', ' ')
