@@ -956,7 +956,8 @@ if df_f_raw is not None and df_r is not None:
                         ("Recursos Vinculados","Recursos Vinculados"),
                         ("Visão Macro","Visão Macro"),
                         ("Folha de Pagamento","Folha de Pagamento"),
-                        ("Programas e PDDE","Programas e PDDE")]:
+                        ("Programas e PDDE","Programas e PDDE"),
+                        ("Merenda e Transporte","Merenda e Transporte")]:
         if st.sidebar.button(label, use_container_width=True):
             st.session_state.setor = key
 
@@ -2458,6 +2459,92 @@ if df_f_raw is not None and df_r is not None:
             st.dataframe(_rt, use_container_width=True, hide_index=True)
         st.markdown("---")
 
+
+    # =========================================================================
+    # SETOR MERENDA E TRANSPORTE ESCOLAR (identificado pela coluna Atividade)
+    # =========================================================================
+    elif st.session_state.setor == 'Merenda e Transporte':
+        st.markdown("<h1 style='text-align:left;'>📖 São Roque de Minas — Merenda e Transporte Escolar</h1>",
+                    unsafe_allow_html=True)
+        st.markdown("---")
+
+        liq_cols = [f"{m}_Liquidado" for m in meses_disponiveis
+                    if f"{m}_Liquidado" in df_f_raw.columns]
+        _PALETA_ELEM = ['#1a7a4a', '#2980b9', '#8e44ad', '#e67e22', '#c0392b',
+                        '#16a085', '#2c3e50', '#d35400', '#7f8c8d', '#2563eb']
+
+        def _render_atividade(titulo, emoji, termo_regex, _slug):
+            st.subheader(f"{emoji} {titulo}")
+            _df = df_f_raw[df_f_raw['Atividade'].astype(str).str.contains(
+                termo_regex, na=False, case=False, regex=True)].copy()
+            if not len(_df) or not liq_cols or float(_df[liq_cols].sum().sum()) == 0.0:
+                st.info(f"Sem despesas liquidadas de {titulo.lower()} no período selecionado.")
+                st.markdown("---")
+                return
+            _df['Total'] = _df[liq_cols].sum(axis=1)
+            _elems = sorted(_df[_df['Total'] > 0]['Elemento'].astype(str).str.strip().unique())
+            _sel = st.multiselect(f"Filtrar elementos — {titulo}:", _elems, default=_elems,
+                                  key=f"filtro_elem_{_slug}")
+            _dff = _df[_df['Elemento'].astype(str).str.strip().isin(_sel)].copy()
+            _total_f = float(_dff[liq_cols].sum().sum())
+
+            c1, c2 = st.columns(2)
+            with c1: st.metric(f"Total Liquidado ({meses_disponiveis[0][:3]}–{meses_disponiveis[-1][:3]})",
+                               formar_real(_total_f))
+            with c2: st.metric("Elementos de despesa", str(len(_sel)))
+
+            # Mensal — empilhado por Elemento
+            st.markdown("**Execução mensal (empilhado por elemento de despesa)**")
+            _elem_tot = _dff.groupby('Elemento')[liq_cols].sum().sum(axis=1).sort_values(ascending=False)
+            _elem_list = _elem_tot[_elem_tot > 0].index.tolist()
+            fig_m = go.Figure()
+            for _i, _el in enumerate(_elem_list):
+                _ser = _dff[_dff['Elemento'].astype(str).str.strip() == str(_el).strip()]
+                _ys = [float(_ser[f"{m}_Liquidado"].sum()) if f"{m}_Liquidado" in _ser.columns else 0.0
+                       for m in meses_disponiveis]
+                if sum(_ys) == 0: continue
+                fig_m.add_bar(x=meses_disponiveis, y=_ys, name=str(_el),
+                              marker_color=_PALETA_ELEM[_i % len(_PALETA_ELEM)])
+            fig_m.update_layout(barmode='stack', separators=",.", hoverlabel=HOVER_STYLE,
+                yaxis=dict(showticklabels=False), showlegend=True,
+                legend=dict(orientation="h", yanchor="top", y=-0.18, xanchor="center", x=0.5,
+                            font=dict(size=10)),
+                height=470, margin=dict(b=150, t=20))
+            fig_m.update_traces(hovertemplate=(
+                "<span style='color:white;'><b>%{x} — %{data.name}</b><br>"
+                "Liquidado: <b>R$ %{y:,.2f}</b></span><extra></extra>"))
+            st.plotly_chart(fig_m, use_container_width=True, config=CONFIG_PT)
+
+            # Acumulado — pizza por Elemento
+            st.markdown("**Acumulado por elemento de despesa**")
+            _dpz = _dff.groupby('Elemento')[liq_cols].sum().sum(axis=1).reset_index()
+            _dpz.columns = ['Elemento', 'Valor']
+            _dpz = _dpz[_dpz['Valor'] > 0]
+            fig_pz = px.pie(_dpz, values='Valor', names='Elemento', hole=0.42,
+                            color_discrete_sequence=_PALETA_ELEM)
+            fig_pz.update_traces(textinfo='percent+label', textposition='inside',
+                hovertemplate=("<span style='color:white;'><b>%{label}</b><br>"
+                               "Valor: <b>R$ %{value:,.2f}</b><br>"
+                               "Participação: <b>%{percent}</b></span><extra></extra>"),
+                hoverlabel=HOVER_STYLE)
+            fig_pz.update_layout(separators=",.", showlegend=True,
+                legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5),
+                height=430, margin=dict(t=30, b=60))
+            _, _cp, _ = st.columns([1, 2, 1])
+            with _cp:
+                st.plotly_chart(fig_pz, use_container_width=True, config=CONFIG_PT)
+
+            # Detalhe — qual a fonte de gasto
+            _dfonte = _dff.groupby('Fonte')[liq_cols].sum().sum(axis=1).reset_index()
+            _dfonte.columns = ['Fonte', 'Total']
+            _dfonte = _dfonte[_dfonte['Total'] > 0].sort_values('Total', ascending=False)
+            _dfonte['Total'] = _dfonte['Total'].apply(formar_real)
+            with st.expander(f"🔎 Fonte de gasto — {titulo}"):
+                st.dataframe(_dfonte, use_container_width=True, hide_index=True)
+            st.markdown("---")
+
+        _render_atividade("Merenda Escolar", "🍽️", r"merenda|alimenta", "merenda")
+        _render_atividade("Transporte Escolar", "🚌", r"transporte", "transporte")
 
     st.markdown("### 📋 Relatório Geral de Fichas")
     df_f_filt = df_f_raw[df_f_raw['Atividade'].str.contains(
