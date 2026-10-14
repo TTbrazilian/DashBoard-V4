@@ -2522,14 +2522,16 @@ if df_f_raw is not None and df_r is not None:
             _dpz = _dpz[_dpz['Valor'] > 0]
             fig_pz = px.pie(_dpz, values='Valor', names='Elemento', hole=0.42,
                             color_discrete_sequence=_PALETA_ELEM)
-            fig_pz.update_traces(textinfo='percent+label', textposition='inside',
+            fig_pz.update_traces(textinfo='percent', textposition='inside',
+                domain=dict(x=[0.0, 1.0], y=[0.34, 1.0]),
                 hovertemplate=("<span style='color:white;'><b>%{label}</b><br>"
                                "Valor: <b>R$ %{value:,.2f}</b><br>"
                                "Participação: <b>%{percent}</b></span><extra></extra>"),
                 hoverlabel=HOVER_STYLE)
             fig_pz.update_layout(separators=",.", showlegend=True,
-                legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5),
-                height=430, margin=dict(t=30, b=60))
+                legend=dict(orientation="h", yanchor="top", y=0.24, xanchor="center", x=0.5,
+                            font=dict(size=11)),
+                height=560, margin=dict(t=30, b=20))
             _, _cp, _ = st.columns([1, 2, 1])
             with _cp:
                 st.plotly_chart(fig_pz, use_container_width=True, config=CONFIG_PT)
