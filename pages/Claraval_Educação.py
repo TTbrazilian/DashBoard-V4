@@ -954,7 +954,8 @@ if df_f_raw is not None and df_r is not None:
                         ("Recursos Vinculados","Recursos Vinculados"),
                         ("Visão Macro","Visão Macro"),
                         ("Folha de Pagamento","Folha de Pagamento"),
-                        ("Programas e PDDE","Programas e PDDE")]:
+                        ("Programas e PDDE","Programas e PDDE"),
+                        ("Merenda e Transporte","Merenda e Transporte")]:
         if st.sidebar.button(label, use_container_width=True):
             st.session_state.setor = key
 
@@ -2386,6 +2387,94 @@ if df_f_raw is not None and df_r is not None:
             st.dataframe(_rt, use_container_width=True, hide_index=True)
         st.markdown("---")
 
+
+    # =========================================================================
+    # SETOR MERENDA E TRANSPORTE ESCOLAR (identificado pela coluna Atividade)
+    # =========================================================================
+    elif st.session_state.setor == 'Merenda e Transporte':
+        st.markdown("<h1 style='text-align:left;'>📖 Claraval — Merenda e Transporte Escolar</h1>",
+                    unsafe_allow_html=True)
+        st.markdown("---")
+
+        liq_cols = [f"{m}_Liquidado" for m in meses_disponiveis
+                    if f"{m}_Liquidado" in df_f_raw.columns]
+        _PALETA_MT = ['#1a7a4a', '#2980b9', '#8e44ad', '#e67e22', '#c0392b',
+                      '#16a085', '#2c3e50', '#d35400', '#7f8c8d', '#2563eb',
+                      '#27ae60', '#9b59b6']
+
+        def _mt_mensal(_dff, _dim, _dim_lbl):
+            st.markdown(f"**Execução mensal (empilhado por {_dim_lbl})**")
+            _tot = _dff.groupby(_dim)[liq_cols].sum().sum(axis=1).sort_values(ascending=False)
+            _keys = _tot[_tot > 0].index.tolist()
+            _fig = go.Figure()
+            for _i, _k in enumerate(_keys):
+                _ser = _dff[_dff[_dim].astype(str).str.strip() == str(_k).strip()]
+                _ys = [float(_ser[f"{m}_Liquidado"].sum()) if f"{m}_Liquidado" in _ser.columns else 0.0
+                       for m in meses_disponiveis]
+                if sum(_ys) == 0: continue
+                _fig.add_bar(x=meses_disponiveis, y=_ys, name=str(_k),
+                             marker_color=_PALETA_MT[_i % len(_PALETA_MT)])
+            _fig.update_layout(barmode='stack', separators=",.", hoverlabel=HOVER_STYLE,
+                yaxis=dict(showticklabels=False), showlegend=True,
+                legend=dict(orientation="h", yanchor="top", y=-0.18, xanchor="center", x=0.5,
+                            font=dict(size=10)),
+                height=470, margin=dict(b=150, t=20))
+            _fig.update_traces(hovertemplate=(
+                "<span style='color:white;'><b>%{x} — %{data.name}</b><br>"
+                "Liquidado: <b>R$ %{y:,.2f}</b></span><extra></extra>"))
+            st.plotly_chart(_fig, use_container_width=True, config=CONFIG_PT)
+
+        def _mt_pizza(_dff, _dim, _dim_lbl):
+            st.markdown(f"**Acumulado por {_dim_lbl}**")
+            _dpz = _dff.groupby(_dim)[liq_cols].sum().sum(axis=1).reset_index()
+            _dpz.columns = [_dim, 'Valor']
+            _dpz = _dpz[_dpz['Valor'] > 0]
+            _fig = px.pie(_dpz, values='Valor', names=_dim, hole=0.42,
+                          color_discrete_sequence=_PALETA_MT)
+            _fig.update_traces(textinfo='percent', textposition='inside',
+                domain=dict(x=[0.0, 1.0], y=[0.34, 1.0]),
+                hovertemplate=("<span style='color:white;'><b>%{label}</b><br>"
+                               "Valor: <b>R$ %{value:,.2f}</b><br>"
+                               "Participação: <b>%{percent}</b></span><extra></extra>"),
+                hoverlabel=HOVER_STYLE)
+            _fig.update_layout(separators=",.", showlegend=True,
+                legend=dict(orientation="h", yanchor="top", y=0.24, xanchor="center", x=0.5,
+                            font=dict(size=11)),
+                height=560, margin=dict(t=30, b=20))
+            _, _cp, _ = st.columns([1, 2, 1])
+            with _cp:
+                st.plotly_chart(_fig, use_container_width=True, config=CONFIG_PT)
+
+        def _render_atividade(titulo, emoji, termo_regex, _slug, _dims, _filtro_dim, _filtro_lbl):
+            st.subheader(f"{emoji} {titulo}")
+            _df = df_f_raw[df_f_raw['Atividade'].astype(str).str.contains(
+                termo_regex, na=False, case=False, regex=True)].copy()
+            if not len(_df) or not liq_cols or float(_df[liq_cols].sum().sum()) == 0.0:
+                st.info(f"Sem despesas liquidadas de {titulo.lower()} no período selecionado.")
+                st.markdown("---")
+                return
+            _df['Total'] = _df[liq_cols].sum(axis=1)
+            _opts = sorted(_df[_df['Total'] > 0][_filtro_dim].astype(str).str.strip().unique())
+            _sel = st.multiselect(f"Filtrar {_filtro_lbl} — {titulo}:", _opts, default=_opts,
+                                  key=f"filtro_{_slug}")
+            _dff = _df[_df[_filtro_dim].astype(str).str.strip().isin(_sel)].copy()
+            _total_f = float(_dff[liq_cols].sum().sum())
+            c1, c2 = st.columns(2)
+            with c1: st.metric(f"Total Liquidado ({meses_disponiveis[0][:3]}–{meses_disponiveis[-1][:3]})",
+                               formar_real(_total_f))
+            with c2: st.metric(_filtro_lbl.capitalize(), str(len(_sel)))
+            for _dim, _dim_lbl in _dims:
+                _mt_mensal(_dff, _dim, _dim_lbl)
+                _mt_pizza(_dff, _dim, _dim_lbl)
+            st.markdown("---")
+
+        # Merenda: só material de consumo → análise por FONTE (receita que custeou)
+        _render_atividade("Merenda Escolar", "🍽️", r"merenda|alimenta", "merenda",
+                          [('Fonte', 'fonte de receita')], 'Fonte', 'fontes')
+        # Transporte: por ELEMENTO (o que é gasto) E por FONTE (de onde veio)
+        _render_atividade("Transporte Escolar", "🚌", r"transporte", "transporte",
+                          [('Elemento', 'elemento de despesa'), ('Fonte', 'fonte de receita')],
+                          'Elemento', 'elementos')
 
     st.markdown("### 📋 Relatório Geral de Fichas")
     df_f_filt = df_f_raw[df_f_raw['Atividade'].str.contains(
