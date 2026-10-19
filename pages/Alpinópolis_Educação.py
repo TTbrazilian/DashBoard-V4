@@ -1156,7 +1156,13 @@ if df_f_raw is not None and df_r is not None:
         desp_f4_70    = sum(v for k, v in desp_f4.items() if k not in FUNDEB4_VAAR)
         desp_f4_vaar  = sum(v for k, v in desp_f4.items() if k in FUNDEB4_VAAR)
         desp_f4_total = desp_f4_70 + desp_f4_vaar
-        desp_70_vigente = desp_15407 + desp_f4_70   # 15407 + Principal + VAAT (VAAR fora do 70%)
+        # 70% (folha) = 15407 + VAAT base (15427) + 4% folha final-2 (154072 + 154272).
+        # Fontes final-1 (154071/154271) e VAAR ficam fora do 70% (custeio/capital).
+        _FOLHA_70_EXTRA = ['15427', '154072', '154272']
+        def _folha70_extra(meses):
+            return sum(_desp_f(_f, meses) for _f in _FOLHA_70_EXTRA)
+        desp_70_folha4  = _folha70_extra(meses_disponiveis)
+        desp_70_vigente = desp_15407 + desp_70_folha4
         desp_30_vigente = soma(df_df_fundeb[(df_df_fundeb['Fonte']=='15403') &
                                 (df_df_fundeb['Tipo']=='Liquidado')], meses_disponiveis)
         tot_desp_vigente = desp_70_vigente + desp_30_vigente
@@ -1219,20 +1225,19 @@ if df_f_raw is not None and df_r is not None:
         _val_vaat      = soma(df_r_fundeb[df_r_fundeb['Subcategoria']=='VAAT'], meses_disponiveis)
         _val_vaar      = soma(df_r_fundeb[df_r_fundeb['Subcategoria']=='VAAR'], meses_disponiveis)
         _val_eti       = soma(df_r_fundeb[df_r_fundeb['Subcategoria']=='ETI'], meses_disponiveis)
-        _c1, _c2, _c3, _c4, _c5 = st.columns(5)
+        # VAAT e VAAR consolidados numa única "Receita FUNDEB" — evita confusão dos secretários.
+        _val_rec_fundeb = _val_vaat + _val_vaar
+        _c1, _c2, _c3, _c4 = st.columns(4)
         with _c1: st.metric("Principal", formar_real(_val_principal),
                              delta=f"{_val_principal/tot_rec_periodo*100:.1f}% do total" if tot_rec_periodo>0 else "—",
                              delta_color="off")
         with _c2: st.metric("Rendimentos FUNDEB", formar_real(_val_rend),
                              delta=f"{_val_rend/tot_rec_periodo*100:.1f}% do total" if tot_rec_periodo>0 else "—",
                              delta_color="off")
-        with _c3: st.metric("VAAT (entra 70% e 4%)", formar_real(_val_vaat),
-                             delta=f"{_val_vaat/tot_rec_periodo*100:.1f}% do total" if tot_rec_periodo>0 else "—",
+        with _c3: st.metric("Receita FUNDEB", formar_real(_val_rec_fundeb),
+                             delta=f"{_val_rec_fundeb/tot_rec_periodo*100:.1f}% do total" if tot_rec_periodo>0 else "—",
                              delta_color="off")
-        with _c4: st.metric("VAAR (só 4%)", formar_real(_val_vaar),
-                             delta=f"{_val_vaar/tot_rec_periodo*100:.1f}% do total" if tot_rec_periodo>0 else "—",
-                             delta_color="off")
-        with _c5: st.metric("ETI (Tempo Integral)", formar_real(_val_eti),
+        with _c4: st.metric("ETI (Tempo Integral)", formar_real(_val_eti),
                              delta=f"{_val_eti/tot_rec_periodo*100:.1f}% do total" if tot_rec_periodo>0 else "—",
                              delta_color="off")
 
@@ -1398,17 +1403,17 @@ if df_f_raw is not None and df_r is not None:
                 hovertemplate=("<span style='color:white;'><b>FUNDEB 70% — Fonte 15407</b><br>"
                                "Liquidado: <b>"+formar_real(desp_15407)+"</b></span><extra></extra>"),
             ))
-            for _fc, _lb, _cor in FUNDEB4_FONTES:
-                if _fc in FUNDEB4_VAAR: continue   # VAAR não entra no 70%
-                _v = desp_f4.get(_fc, 0.0)
+            if desp_70_folha4 > 0:
                 fig_70.add_trace(go.Bar(
-                    x=["Despesas 70%\n(Liquidado)"], y=[_v], name=_lb, marker_color=_cor,
-                    text=[formar_real(_v) if _v > 0 else ""], textposition='inside',
-                    insidetextanchor='middle',
-                    hovertemplate=("<span style='color:white;'><b>"+_lb+"</b><br>"
-                                   "Liquidado: <b>"+formar_real(_v)+"</b><br>"
+                    x=["Despesas 70%\n(Liquidado)"], y=[desp_70_folha4],
+                    name="Folha complementar 4% (154072 + 154272)", marker_color="#e67e22",
+                    text=[formar_real(desp_70_folha4)], textposition='inside', insidetextanchor='middle',
+                    hovertemplate=("<span style='color:white;'><b>Folha complementar 4% (final 2)</b><br>"
+                                   "154072 (Principal) + 154272 (VAAT) + 15427<br>"
+                                   "Liquidado: <b>"+formar_real(desp_70_folha4)+"</b><br>"
                                    "Compõe o índice dos 70%</span><extra></extra>"),
                 ))
+            # Fontes final-1 (154071/154271) e o VAAR ficam fora do 70% (custeio/capital).
             fig_70.add_annotation(x="Despesas 70%\n(Liquidado)", y=desp_70_vigente,
                 text=f"<b>{formar_real(desp_70_vigente)}</b> ({perc_70_indice:.2f}%)",
                 showarrow=False, yshift=14, font=dict(size=13, color="#333"))
@@ -1431,10 +1436,10 @@ if df_f_raw is not None and df_r is not None:
             fig_70.add_bar(x=_meses, y=[_desp_f('15407', [m]) for m in _meses],
                            name="FUNDEB 70% (15407)",
                            marker_color=COR_DESP['FUNDEB 70% – Vigente'], offsetgroup='desp')
-            for _fc, _lb, _cor in FUNDEB4_FONTES:
-                if _fc in FUNDEB4_VAAR: continue   # VAAR não entra no 70%
-                fig_70.add_bar(x=_meses, y=[_desp_f(_fc, [m]) for m in _meses],
-                               name=_lb, marker_color=_cor, offsetgroup='desp')
+            _yf4 = [_folha70_extra([m]) for m in _meses]   # folha complementar final-2
+            if sum(_yf4) > 0:
+                fig_70.add_bar(x=_meses, y=_yf4, name="Folha complementar 4% (154072 + 154272)",
+                               marker_color="#e67e22", offsetgroup='desp')
             fig_70.update_layout(barmode='stack')
             # REGRA LINHA DE META: shapes com _OFFSET=0.22
             df_meta_70 = pd.DataFrame([
@@ -2455,6 +2460,19 @@ if df_f_raw is not None and df_r is not None:
         _PALETA_MT = ['#1a7a4a', '#2980b9', '#8e44ad', '#e67e22', '#c0392b',
                       '#16a085', '#2c3e50', '#d35400', '#7f8c8d', '#2563eb',
                       '#27ae60', '#9b59b6']
+        # Mapa de cor por FONTE, consistente entre merenda e transporte (mesma fonte = mesma cor).
+        # Recursos Próprios (15001) sempre verde; demais fontes recebem cor fixa estável.
+        _df_mt_all = df_f_raw[df_f_raw['Atividade'].astype(str).str.contains(
+            r'merenda|alimenta|transporte', na=False, case=False, regex=True)]
+        _fontes_mt = sorted(_df_mt_all['Fonte'].astype(str).str.strip().unique())
+        _PAL_FONTE = ['#2980b9', '#8e44ad', '#e67e22', '#c0392b', '#16a085',
+                      '#2c3e50', '#d35400', '#7f8c8d', '#2563eb', '#9b59b6', '#27ae60']
+        _CORES_FONTE, _pi = {}, 0
+        for _ft in _fontes_mt:
+            if _ft == '15001':
+                _CORES_FONTE[_ft] = '#1a7a4a'   # verde = Recursos Próprios
+            else:
+                _CORES_FONTE[_ft] = _PAL_FONTE[_pi % len(_PAL_FONTE)]; _pi += 1
 
         def _mt_mensal(_dff, _dim, _dim_lbl):
             st.markdown(f"**Execução mensal (empilhado por {_dim_lbl})**")
@@ -2466,8 +2484,9 @@ if df_f_raw is not None and df_r is not None:
                 _ys = [float(_ser[f"{m}_Liquidado"].sum()) if f"{m}_Liquidado" in _ser.columns else 0.0
                        for m in meses_disponiveis]
                 if sum(_ys) == 0: continue
-                _fig.add_bar(x=meses_disponiveis, y=_ys, name=str(_k),
-                             marker_color=_PALETA_MT[_i % len(_PALETA_MT)])
+                _cor = (_CORES_FONTE.get(str(_k).strip(), _PALETA_MT[_i % len(_PALETA_MT)])
+                        if _dim == 'Fonte' else _PALETA_MT[_i % len(_PALETA_MT)])
+                _fig.add_bar(x=meses_disponiveis, y=_ys, name=str(_k), marker_color=_cor)
             _fig.update_layout(barmode='stack', separators=",.", hoverlabel=HOVER_STYLE,
                 yaxis=dict(showticklabels=False), showlegend=True,
                 legend=dict(orientation="h", yanchor="top", y=-0.18, xanchor="center", x=0.5,
@@ -2483,8 +2502,12 @@ if df_f_raw is not None and df_r is not None:
             _dpz = _dff.groupby(_dim)[liq_cols].sum().sum(axis=1).reset_index()
             _dpz.columns = [_dim, 'Valor']
             _dpz = _dpz[_dpz['Valor'] > 0]
-            _fig = px.pie(_dpz, values='Valor', names=_dim, hole=0.42,
-                          color_discrete_sequence=_PALETA_MT)
+            if _dim == 'Fonte':
+                _fig = px.pie(_dpz, values='Valor', names=_dim, hole=0.42,
+                              color=_dim, color_discrete_map=_CORES_FONTE)
+            else:
+                _fig = px.pie(_dpz, values='Valor', names=_dim, hole=0.42,
+                              color_discrete_sequence=_PALETA_MT)
             _fig.update_traces(textinfo='percent', textposition='inside',
                 domain=dict(x=[0.0, 1.0], y=[0.34, 1.0]),
                 hovertemplate=("<span style='color:white;'><b>%{label}</b><br>"

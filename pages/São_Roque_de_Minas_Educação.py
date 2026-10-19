@@ -2473,6 +2473,19 @@ if df_f_raw is not None and df_r is not None:
         _PALETA_MT = ['#1a7a4a', '#2980b9', '#8e44ad', '#e67e22', '#c0392b',
                       '#16a085', '#2c3e50', '#d35400', '#7f8c8d', '#2563eb',
                       '#27ae60', '#9b59b6']
+        # Mapa de cor por FONTE, consistente entre merenda e transporte (mesma fonte = mesma cor).
+        # Recursos Próprios (15001) sempre verde; demais fontes recebem cor fixa estável.
+        _df_mt_all = df_f_raw[df_f_raw['Atividade'].astype(str).str.contains(
+            r'merenda|alimenta|transporte', na=False, case=False, regex=True)]
+        _fontes_mt = sorted(_df_mt_all['Fonte'].astype(str).str.strip().unique())
+        _PAL_FONTE = ['#2980b9', '#8e44ad', '#e67e22', '#c0392b', '#16a085',
+                      '#2c3e50', '#d35400', '#7f8c8d', '#2563eb', '#9b59b6', '#27ae60']
+        _CORES_FONTE, _pi = {}, 0
+        for _ft in _fontes_mt:
+            if _ft == '15001':
+                _CORES_FONTE[_ft] = '#1a7a4a'   # verde = Recursos Próprios
+            else:
+                _CORES_FONTE[_ft] = _PAL_FONTE[_pi % len(_PAL_FONTE)]; _pi += 1
 
         def _mt_mensal(_dff, _dim, _dim_lbl):
             st.markdown(f"**Execução mensal (empilhado por {_dim_lbl})**")
@@ -2484,8 +2497,9 @@ if df_f_raw is not None and df_r is not None:
                 _ys = [float(_ser[f"{m}_Liquidado"].sum()) if f"{m}_Liquidado" in _ser.columns else 0.0
                        for m in meses_disponiveis]
                 if sum(_ys) == 0: continue
-                _fig.add_bar(x=meses_disponiveis, y=_ys, name=str(_k),
-                             marker_color=_PALETA_MT[_i % len(_PALETA_MT)])
+                _cor = (_CORES_FONTE.get(str(_k).strip(), _PALETA_MT[_i % len(_PALETA_MT)])
+                        if _dim == 'Fonte' else _PALETA_MT[_i % len(_PALETA_MT)])
+                _fig.add_bar(x=meses_disponiveis, y=_ys, name=str(_k), marker_color=_cor)
             _fig.update_layout(barmode='stack', separators=",.", hoverlabel=HOVER_STYLE,
                 yaxis=dict(showticklabels=False), showlegend=True,
                 legend=dict(orientation="h", yanchor="top", y=-0.18, xanchor="center", x=0.5,
@@ -2501,8 +2515,12 @@ if df_f_raw is not None and df_r is not None:
             _dpz = _dff.groupby(_dim)[liq_cols].sum().sum(axis=1).reset_index()
             _dpz.columns = [_dim, 'Valor']
             _dpz = _dpz[_dpz['Valor'] > 0]
-            _fig = px.pie(_dpz, values='Valor', names=_dim, hole=0.42,
-                          color_discrete_sequence=_PALETA_MT)
+            if _dim == 'Fonte':
+                _fig = px.pie(_dpz, values='Valor', names=_dim, hole=0.42,
+                              color=_dim, color_discrete_map=_CORES_FONTE)
+            else:
+                _fig = px.pie(_dpz, values='Valor', names=_dim, hole=0.42,
+                              color_discrete_sequence=_PALETA_MT)
             _fig.update_traces(textinfo='percent', textposition='inside',
                 domain=dict(x=[0.0, 1.0], y=[0.34, 1.0]),
                 hovertemplate=("<span style='color:white;'><b>%{label}</b><br>"
