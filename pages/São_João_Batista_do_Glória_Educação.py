@@ -70,6 +70,20 @@ st.markdown("""
             padding: 0 !important;
             overflow: hidden !important;
         }
+        /* ===== LOGO iG2P no topo do sidebar (alinhado com a setinha de recolher) ===== */
+        [data-testid="stSidebarHeader"] {
+            padding-top: .2rem !important;
+            padding-bottom: 0 !important;
+            min-height: 0 !important;
+        }
+        [data-testid="stSidebarNav"] {
+            margin-top: -2.6rem !important;
+            padding-top: 0 !important;
+        }
+        [data-testid="stSidebarNav"] > ul { padding-top: 0 !important; }
+        section[data-testid="stSidebar"] .ig2p-logo-sidebar {
+            margin: 0 0 2px 0 !important;
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -829,31 +843,42 @@ _ACOMP_SECOES = {'SIMEC', 'PROGRAMAS SEB', 'PDDE EQUIDADE', 'PNLD',
 
 def _parse_pdde_escolas(raw):
     """Lê o layout livre da aba de Escolas (blocos por escola) e devolve
-    {escola: {'programas': [(prog, previsto, recebido)], 'prev': x, 'rec': y}}."""
+    {escola: {'programas': [(prog, previsto, recebido)], 'prev': x, 'rec': y}}.
+    Cada escola é delimitada pela sua linha de total ('Total Recebido' ou
+    'Total de Recursos'); o cabeçalho de coluna ('Previstos'/'Previsão') só
+    aparece na 1ª escola, então as demais são reconhecidas pelo nome que
+    inicia um bloco (entre totais)."""
     raw = raw.fillna("")
     escolas = {}; cur = None
     for _, r in raw.iterrows():
         c0 = str(r.iloc[0]).strip()
         c1 = str(r.iloc[1]).strip() if raw.shape[1] > 1 else ""
-        if "previsto" in c1.lower():   # casa "Previstos" e "Recursos Previstos"
+        cl = c0.lower()
+        if cl.startswith("total"):                       # fecha o bloco da escola
+            if cur is not None:
+                escolas[cur]["prev"] = limpar_valor(r.iloc[1])
+                escolas[cur]["rec"]  = limpar_valor(r.iloc[2]) if raw.shape[1] > 2 else 0.0
+                cur = None
+            continue
+        if not c0 or cl.startswith("saldo"):
+            continue
+        _tem_valor = (limpar_valor(r.iloc[1]) > 0 or
+                      (raw.shape[1] > 2 and limpar_valor(r.iloc[2]) > 0))
+        # Início de escola: rótulo "previs" em c1 (1ª escola) OU nome sem valor entre blocos.
+        if ("previs" in c1.lower()) or (cur is None and not _tem_valor):
             nome = c0.strip('*').strip()
             cur = None if nome.lower() == "escolas" else nome
             if cur:
-                escolas[cur] = {"programas": [], "prev": 0.0, "rec": 0.0}
+                escolas.setdefault(cur, {"programas": [], "prev": 0.0, "rec": 0.0})
             continue
         if cur is None:
             continue
-        if c0.lower().startswith("total recebido"):
-            escolas[cur]["prev"] = limpar_valor(r.iloc[1])
-            escolas[cur]["rec"]  = limpar_valor(r.iloc[2]) if raw.shape[1] > 2 else 0.0
-            cur = None
-            continue
-        if c0 and not c0.lower().startswith("saldo"):
-            pv = limpar_valor(r.iloc[1])
-            rc = limpar_valor(r.iloc[2]) if raw.shape[1] > 2 else 0.0
-            if pv > 0 or rc > 0:
-                escolas[cur]["programas"].append((c0, pv, rc))
-    return escolas
+        pv = limpar_valor(r.iloc[1])
+        rc = limpar_valor(r.iloc[2]) if raw.shape[1] > 2 else 0.0
+        if pv > 0 or rc > 0:
+            escolas[cur]["programas"].append((c0, pv, rc))
+    return {k: v for k, v in escolas.items()
+            if v["prev"] > 0 or v["rec"] > 0 or v["programas"]}
 
 
 @st.cache_data(ttl=300)

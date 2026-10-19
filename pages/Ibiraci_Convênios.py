@@ -472,6 +472,13 @@ st.markdown("""
             height: 0 !important; min-height: 0 !important;
             margin: 0 !important; padding: 0 !important; overflow: hidden !important;
         }
+        /* ===== LOGO iG2P no topo do sidebar (alinhado com a setinha de recolher) ===== */
+        [data-testid="stSidebarHeader"] {
+            padding-top: .2rem !important; padding-bottom: 0 !important; min-height: 0 !important;
+        }
+        [data-testid="stSidebarNav"] { margin-top: -2.6rem !important; padding-top: 0 !important; }
+        [data-testid="stSidebarNav"] > ul { padding-top: 0 !important; }
+        section[data-testid="stSidebar"] .ig2p-logo-sidebar { margin: 0 0 2px 0 !important; }
     </style>
 """, unsafe_allow_html=True)
 
