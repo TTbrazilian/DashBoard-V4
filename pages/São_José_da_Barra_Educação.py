@@ -1674,7 +1674,8 @@ if df_f_raw is not None and df_r is not None:
                                  (df_df_raw['Tipo']==fase_despesa)].copy()
 
         _desconto_fundeb_nao_util = 0.0
-        _desconto_superavit_ant   = 0.0
+        # (-) Superávit permitido no exercício anterior não aplicado até o 1º quadrimestre
+        _desconto_superavit_ant   = 159_237.52
         _total_descontos_25       = _desconto_fundeb_nao_util + _desconto_superavit_ant
         total_desp_15001 = df_df_15001[meses_disponiveis].sum().sum()
         esforco_total    = max(0.0, total_desp_15001 + tot_deducoes - _total_descontos_25)
@@ -1854,7 +1855,12 @@ if df_f_raw is not None and df_r is not None:
         if view_meta == "Acumulado":
             idx1, idx2, idx3 = st.columns(3)
             with idx1: st.metric("Receitas Base (Impostos + Cota-Parte)", formar_real(tot_rec_base))
-            with idx2: st.metric(f"Esforço Total ({fase_despesa} 15001 + Deduções)", formar_real(esforco_total))
+            with idx2: st.metric(
+                f"Esforço Líquido ({fase_despesa} 15001 + Deduções − Desconto)",
+                formar_real(esforco_total),
+                delta=f"−{formar_real(_total_descontos_25)} descontados" if _total_descontos_25 > 0 else None,
+                delta_color="off"
+            )
             with idx3: metric_contabil("Índice de Aplicação (Mín. 25%)", perc_25, 25.0)
 
             prop_desp = (total_desp_15001/esforco_total*100) if esforco_total>0 else 0
