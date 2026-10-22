@@ -1888,10 +1888,16 @@ if df_f_raw is not None and df_r is not None:
                 name=f"Despesa 15001 ({fase_despesa})", marker_color="#860000",
                 text=[f"{formar_real(total_desp_15001)}\n({prop_desp:.1f}%)"],
                 textposition='inside', insidetextanchor='middle',
-                customdata=[[formar_real(total_desp_15001),f"{prop_desp:.1f}%",fase_despesa]],
+                customdata=[[formar_real(total_desp_15001),f"{prop_desp:.1f}%",fase_despesa,
+                             formar_real(_desconto_superavit_ant),
+                             formar_real(_total_descontos_25)]],
                 hovertemplate=("<span style='color:white;'><b>Despesa Fonte 15001</b><br>"
                                "Estágio: %{customdata[2]}<br>Valor: <b>%{customdata[0]}</b><br>"
-                               "% do esforço: %{customdata[1]}</span><extra></extra>"),
+                               "% do esforço: %{customdata[1]}<br>"
+                               "─────────────────────<br>"
+                               "🔻 Descontos aplicados:<br>"
+                               "Superávit anos ant.: %{customdata[3]}<br>"
+                               "Total descontado: <b>%{customdata[4]}</b></span><extra></extra>"),
             ))
             fig_meta.add_hline(y=tot_rec_base*0.25, line_dash="dash", line_color="#2563eb",
                                annotation_text=f"Meta 25% = {formar_real(tot_rec_base*0.25)}",
