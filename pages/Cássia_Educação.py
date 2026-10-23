@@ -985,7 +985,8 @@ if df_f_raw is not None and df_r is not None:
                         ("Visão Macro","Visão Macro"),
                         ("Folha de Pagamento","Folha de Pagamento"),
                         ("Programas e PDDE","Programas e PDDE"),
-                        ("Merenda e Transporte","Merenda e Transporte")]:
+                        ("Merenda e Transporte","Merenda e Transporte"),
+                        ("🧪 Em Desenvolvimento","🧪 Em Desenvolvimento")]:
         if st.sidebar.button(label, use_container_width=True):
             st.session_state.setor = key
 
@@ -2597,6 +2598,92 @@ if df_f_raw is not None and df_r is not None:
         _render_atividade("Transporte Escolar", "🚌", r"transporte", "transporte",
                           [('Elemento', 'elemento de despesa'), ('Fonte', 'fonte de receita')],
                           'Elemento', 'elementos')
+
+    # =========================================================================
+    # SETOR 🧪 EM DESENVOLVIMENTO — Desempenho das Receitas (comparativo anual)
+    #   Dados 2025: extraídos da planilha "Estudo Fundeb - Cássia 2025.xlsx"
+    #   (aba "Cesta de Imposto 2025"). A planilha tinha inconsistências (coluna
+    #   Total furada; ISS com out/nov/dez iguais ao ICMS), então os valores são
+    #   a SOMA dos meses e estão marcados como "a validar".
+    #   Dados 2026: acumulado YTD, calculado ao vivo do df_r (Impostos+Cota-Parte).
+    # =========================================================================
+    elif st.session_state.setor == '🧪 Em Desenvolvimento':
+        st.markdown("<h1 style='text-align:left;'>🧪 Cássia — Desempenho das Receitas "
+                    "<span style='font-size:.5em;color:#f39c12'>(EM DESENVOLVIMENTO)</span></h1>",
+                    unsafe_allow_html=True)
+        st.warning("🧪 **Aba em desenvolvimento / testes.** Os valores de **2025** foram extraídos "
+                   "de uma planilha com inconsistências (coluna *Total* furada; ISS com out/nov/dez "
+                   "repetidos do ICMS) e **ainda precisam ser validados**. O **2026** é o acumulado "
+                   "do ano até o último mês com dados. **Não usar para divulgação** até aprovação.")
+        st.markdown("---")
+
+        # 2025 — totais anuais (soma dos meses; a validar)
+        REC_2025 = {
+            'ISS':  5_752_754.80,   # ⚠ out/nov/dez possivelmente copiados do ICMS
+            'IPTU': 4_065_718.74,   # junho atípico (R$ 2,13 mi)
+            'ITBI': 2_280_138.07,
+            'ICMS': 9_781_577.05,
+            'IPVA': 4_993_248.84,
+            'FPM':  36_699_184.60,
+        }
+        _ANO_ANT, _ANO_ATUAL = 2025, 2026
+
+        # 2026 — acumulado YTD ao vivo (Impostos + Cota-Parte)
+        _MAP_IMP = {
+            'PROPRIEDADE PREDIAL E TERRITORIAL URBANA': 'IPTU',
+            'TRANSMISSÃO "INTER VIVOS"': 'ITBI', 'TRANSMISSÃO INTER VIVOS': 'ITBI',
+            'SERVIÇOS DE QUALQUER NATUREZA': 'ISS',
+            'FUNDO DE PARTICIPAÇÃO DOS MUNICÍPIOS': 'FPM',
+            'FUNDO DE PARTICIPAÇÃO DO MUNICÍPIOS': 'FPM',
+            'ICMS': 'ICMS', 'IPVA': 'IPVA',
+        }
+        def _imp_2026(desc):
+            du = str(desc).upper().replace('“', '"').replace('”', '"')
+            for _longo, _curto in _MAP_IMP.items():
+                if _longo in du:
+                    return _curto
+            return None
+        _base26 = df_r[df_r['Categoria'].str.strip().isin(['Impostos', 'Cota-Parte'])].copy()
+        _base26['IMP'] = _base26['Descrição da Receita'].apply(_imp_2026)
+        REC_2026 = {}
+        for _imp in REC_2025:
+            _sub = _base26[_base26['IMP'] == _imp]
+            REC_2026[_imp] = float(soma(_sub, meses_disponiveis)) if len(_sub) else 0.0
+        _ult_mes = meses_disponiveis[-1] if meses_disponiveis else ''
+
+        st.subheader(f"📊 Comparativo de Receitas — {_ANO_ANT} × {_ANO_ATUAL}")
+        st.caption(f"{_ANO_ATUAL} = acumulado de {meses_disponiveis[0]} a {_ult_mes} · "
+                   f"{_ANO_ANT} = ano completo. Comparação de período parcial × ano cheio — "
+                   "a variação final exige mesmo período (a ajustar).")
+        _ordem = ['ISS', 'IPTU', 'ITBI', 'ICMS', 'IPVA', 'FPM']
+        fig_cmp = go.Figure()
+        fig_cmp.add_bar(name=str(_ANO_ANT), x=_ordem, y=[REC_2025[i] for i in _ordem],
+                        marker_color='#7f8c8d',
+                        text=[formar_real(REC_2025[i]) for i in _ordem], textposition='outside')
+        fig_cmp.add_bar(name=str(_ANO_ATUAL), x=_ordem, y=[REC_2026[i] for i in _ordem],
+                        marker_color='#1a7a4a',
+                        text=[formar_real(REC_2026[i]) for i in _ordem], textposition='outside')
+        fig_cmp.update_layout(barmode='group', separators=",.", hoverlabel=HOVER_STYLE,
+            yaxis=dict(showticklabels=False), showlegend=True,
+            legend=dict(orientation="h", yanchor="bottom", y=-0.18, xanchor="center", x=0.5),
+            height=470, margin=dict(t=20, b=70))
+        fig_cmp.update_traces(hovertemplate=(
+            "<span style='color:white;'><b>%{x} — %{data.name}</b><br>"
+            "Valor: <b>R$ %{y:,.2f}</b></span><extra></extra>"))
+        st.plotly_chart(fig_cmp, use_container_width=True, config=CONFIG_PT)
+
+        _linhas = []
+        for i in _ordem:
+            v25, v26 = REC_2025[i], REC_2026[i]
+            var = ((v26 - v25) / v25 * 100) if v25 > 0 else 0.0
+            _linhas.append({"Imposto": i, f"{_ANO_ANT} (ano)": formar_real(v25),
+                            f"{_ANO_ATUAL} (acum.)": formar_real(v26),
+                            "Variação (parcial)": f"{var:+.1f}%"})
+        st.dataframe(pd.DataFrame(_linhas), use_container_width=True, hide_index=True)
+        st.markdown("---")
+        st.info("🔜 Próximas seções (em breve, nesta aba): **Repasses do FPM**, "
+                "**Receitas × Despesas (RREO)** e **cards-resumo** de Receitas Correntes. "
+                "Fonte 2025: *Estudo Fundeb - Cássia 2025* (Cesta de Imposto 2025).")
 
     st.markdown("### 📋 Relatório Geral de Fichas")
     df_f_filt = df_f_raw[df_f_raw['Atividade'].str.contains(
