@@ -2619,8 +2619,12 @@ if df_f_raw is not None and df_r is not None:
             _dfc = df_f_raw.copy()
             _dfc['Categoria'] = _dfc['Categoria'].astype(str).str.strip()
             _dfc = _dfc[(_dfc['Categoria'] != '') & (_dfc['Categoria'].str.lower() != 'categoria')]
+            # Garante colunas de Liquidado numéricas (o df completo pode ter células de texto
+            # em linhas de cabeçalho/subtotal → evita TypeError na soma e no filtro).
+            for _c in liq_cols:
+                _dfc[_c] = pd.to_numeric(_dfc[_c], errors='coerce').fillna(0.0)
             _dfc['Total'] = _dfc[liq_cols].sum(axis=1)
-            _cats = sorted(_dfc[_dfc['Total'] > 0]['Categoria'].unique())
+            _cats = sorted(_dfc.loc[_dfc['Total'] > 0, 'Categoria'].unique(), key=str)
             if not _cats:
                 st.info("Sem despesas liquidadas por categoria no período selecionado.")
             else:
