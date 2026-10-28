@@ -2618,7 +2618,8 @@ if df_f_raw is not None and df_r is not None:
         else:
             _dfc = df_f_raw.copy()
             _dfc['Categoria'] = _dfc['Categoria'].astype(str).str.strip()
-            _dfc = _dfc[(_dfc['Categoria'] != '') & (_dfc['Categoria'].str.lower() != 'categoria')]
+            _dfc = _dfc[(_dfc['Categoria'] != '') &
+                        (~_dfc['Categoria'].str.lower().isin(['categoria', 'nan', 'none']))]
             # Garante colunas de Liquidado numéricas (o df completo pode ter células de texto
             # em linhas de cabeçalho/subtotal → evita TypeError na soma e no filtro).
             for _c in liq_cols:
