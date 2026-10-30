@@ -2492,7 +2492,9 @@ if df_f_raw is not None and df_r is not None:
         # Recursos Próprios (15001) sempre verde; demais fontes recebem cor fixa estável.
         _df_mt_all = df_f_raw[df_f_raw['Atividade'].astype(str).str.contains(
             r'merenda|alimenta|transporte', na=False, case=False, regex=True)]
-        _fontes_mt = sorted(_df_mt_all['Fonte'].astype(str).str.strip().unique())
+        _fontes_mt = sorted(
+            {_v for _v in (str(_x).strip() for _x in _df_mt_all['Fonte'].tolist())
+             if _v and _v.lower() not in ('nan', 'none', '<na>')}, key=str)
         _PAL_FONTE = ['#2980b9', '#8e44ad', '#e67e22', '#c0392b', '#16a085',
                       '#2c3e50', '#d35400', '#7f8c8d', '#2563eb', '#9b59b6', '#27ae60']
         _CORES_FONTE, _pi = {}, 0
@@ -2688,7 +2690,9 @@ if df_f_raw is not None and df_r is not None:
                     st.info("Sem informação de fonte para o recorte selecionado.")
                 else:
                     # cor fixa por fonte (consistente entre recortes); 15001 = verde (Rec. Próprios)
-                    _fontes_all = sorted(_dfc['Fonte'].astype(str).str.strip().unique())
+                    _fontes_all = sorted(
+                        {_v for _v in (str(_x).strip() for _x in _dfc['Fonte'].tolist())
+                         if _v and _v.lower() not in ('nan', 'none', '<na>')}, key=str)
                     _PAL_F = ['#2980b9', '#8e44ad', '#e67e22', '#c0392b', '#16a085',
                               '#2c3e50', '#d35400', '#7f8c8d', '#2563eb', '#9b59b6', '#27ae60']
                     _CORF, _pf = {}, 0
@@ -2698,7 +2702,8 @@ if df_f_raw is not None and df_r is not None:
                         else:
                             _CORF[_ft] = _PAL_F[_pf % len(_PAL_F)]; _pf += 1
                     _dff2 = _dff.copy()
-                    _dff2['Fonte'] = _dff2['Fonte'].astype(str).str.strip()
+                    _dff2['Fonte'] = _dff2['Fonte'].apply(lambda _v: str(_v).strip())
+                    _dff2 = _dff2[~_dff2['Fonte'].str.lower().isin(['', 'nan', 'none', '<na>'])]
                     _dpf = _dff2.groupby('Fonte')[liq_cols].sum().sum(axis=1).reset_index()
                     _dpf.columns = ['Fonte', 'Valor']
                     _dpf = _dpf[_dpf['Valor'] > 0].sort_values('Valor', ascending=False)
