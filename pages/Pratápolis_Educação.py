@@ -997,7 +997,8 @@ if df_f_raw is not None and df_r is not None:
                         ("Visão Macro","Visão Macro"),
                         ("Folha de Pagamento","Folha de Pagamento"),
                         ("Programas e PDDE","Programas e PDDE"),
-                        ("Merenda e Transporte","Merenda e Transporte")]:
+                        ("Merenda e Transporte","Merenda e Transporte"),
+                        ("Investimento por Categoria","Investimento por Categoria")]:
         if st.sidebar.button(label, use_container_width=True):
             st.session_state.setor = key
 
@@ -2523,6 +2524,168 @@ if df_f_raw is not None and df_r is not None:
         _render_atividade("Transporte Escolar", "🚌", r"transporte", "transporte",
                           [('Elemento', 'elemento de despesa'), ('Fonte', 'fonte de receita')],
                           'Elemento', 'elementos')
+
+    # =========================================================================
+    # SETOR INVESTIMENTO POR CATEGORIA DE ENSINO
+    #   Classificação na 1ª coluna da aba Fichas → coluna 'Categoria' do df_f_raw
+    #   (Educação Infantil, Ensino Fundamental, Ensino Geral, Superior, etc.).
+    # =========================================================================
+    elif st.session_state.setor == 'Investimento por Categoria':
+        st.markdown("<h1 style='text-align:left;'>📚 Pratápolis — Investimento por Categoria de Ensino</h1>",
+                    unsafe_allow_html=True)
+        st.markdown("---")
+        liq_cols = [f"{m}_Liquidado" for m in meses_disponiveis
+                    if f"{m}_Liquidado" in df_f_raw.columns]
+        if 'Categoria' not in getattr(df_f_raw, 'columns', []) or not liq_cols:
+            st.info("Não encontrei a coluna 'Categoria' na aba Fichas (ou não há meses com dados "
+                    "no período). Verifique se a 1ª coluna das Fichas traz a classificação "
+                    "(Educação Infantil, Ensino Fundamental, etc.).")
+        else:
+            _dfc = df_f_raw.copy()
+            _dfc['Categoria'] = _dfc['Categoria'].astype(str).str.strip()
+            _dfc = _dfc[(_dfc['Categoria'] != '') &
+                        (~_dfc['Categoria'].str.lower().isin(['categoria', 'nan', 'none']))]
+            # Garante colunas de Liquidado numéricas (o df completo pode ter células de texto
+            # em linhas de cabeçalho/subtotal → evita TypeError na soma e no filtro).
+            for _c in liq_cols:
+                _dfc[_c] = pd.to_numeric(_dfc[_c], errors='coerce').fillna(0.0)
+            _dfc['Total'] = _dfc[liq_cols].sum(axis=1)
+            _cats = sorted(_dfc.loc[_dfc['Total'] > 0, 'Categoria'].unique(), key=str)
+            if not _cats:
+                st.info("Sem despesas liquidadas por categoria no período selecionado.")
+            else:
+                _sel = st.multiselect("Filtrar categorias de ensino:", _cats, default=_cats,
+                                      key="filtro_cat_ensino")
+                _dff = _dfc[_dfc['Categoria'].isin(_sel)].copy()
+                _total_cat = float(_dff[liq_cols].sum().sum())
+                _PAL_CAT = ['#1a7a4a', '#2980b9', '#8e44ad', '#e67e22', '#c0392b',
+                            '#16a085', '#2c3e50', '#d35400', '#7f8c8d', '#2563eb']
+
+                k1, k2 = st.columns(2)
+                with k1: st.metric(f"Total Liquidado ({meses_disponiveis[0][:3]}–{meses_disponiveis[-1][:3]})",
+                                   formar_real(_total_cat))
+                with k2: st.metric("Categorias no período", str(len(_cats)))
+                st.markdown("---")
+
+                # Acumulado por categoria — pizza
+                st.subheader("🔹 Acumulado por categoria de ensino")
+                _dpzc = _dff.groupby('Categoria')[liq_cols].sum().sum(axis=1).reset_index()
+                _dpzc.columns = ['Categoria', 'Valor']
+                _dpzc = _dpzc[_dpzc['Valor'] > 0].sort_values('Valor', ascending=False)
+                fig_catpz = px.pie(_dpzc, values='Valor', names='Categoria', hole=0.42,
+                                   color_discrete_sequence=_PAL_CAT)
+                fig_catpz.update_traces(textinfo='percent', textposition='inside',
+                    domain=dict(x=[0.0, 1.0], y=[0.34, 1.0]),
+                    hovertemplate=("<span style='color:white;'><b>%{label}</b><br>"
+                                   "Valor: <b>R$ %{value:,.2f}</b><br>"
+                                   "Participação: <b>%{percent}</b></span><extra></extra>"),
+                    hoverlabel=HOVER_STYLE)
+                fig_catpz.update_layout(separators=",.", showlegend=True,
+                    legend=dict(orientation="h", yanchor="top", y=0.24, xanchor="center", x=0.5,
+                                font=dict(size=11)),
+                    height=560, margin=dict(t=30, b=20))
+                _, _cpc, _ = st.columns([1, 2, 1])
+                with _cpc:
+                    st.plotly_chart(fig_catpz, use_container_width=True, config=CONFIG_PT)
+
+                # Mensal — empilhado por categoria
+                st.subheader("🔹 Execução mensal (empilhado por categoria)")
+                _cat_ord = _dpzc['Categoria'].tolist()
+                fig_catm = go.Figure()
+                for _i, _ct in enumerate(_cat_ord):
+                    _ser = _dff[_dff['Categoria'] == _ct]
+                    _ys = [float(_ser[f"{m}_Liquidado"].sum()) if f"{m}_Liquidado" in _ser.columns else 0.0
+                           for m in meses_disponiveis]
+                    if sum(_ys) == 0: continue
+                    fig_catm.add_bar(x=meses_disponiveis, y=_ys, name=str(_ct),
+                                     marker_color=_PAL_CAT[_i % len(_PAL_CAT)])
+                fig_catm.update_layout(barmode='stack', separators=",.", hoverlabel=HOVER_STYLE,
+                    yaxis=dict(showticklabels=False), showlegend=True,
+                    legend=dict(orientation="h", yanchor="top", y=-0.18, xanchor="center", x=0.5,
+                                font=dict(size=10)),
+                    height=470, margin=dict(b=130, t=20))
+                fig_catm.update_traces(hovertemplate=(
+                    "<span style='color:white;'><b>%{x} — %{data.name}</b><br>"
+                    "Liquidado: <b>R$ %{y:,.2f}</b></span><extra></extra>"))
+                st.plotly_chart(fig_catm, use_container_width=True, config=CONFIG_PT)
+
+                # Tabela com participação
+                _tab = _dpzc.copy()
+                _tab['Participação'] = (_tab['Valor'] / _total_cat * 100).map(lambda v: f"{v:.1f}%") \
+                    if _total_cat > 0 else "—"
+                _tab['Valor'] = _tab['Valor'].apply(formar_real)
+                st.dataframe(_tab, use_container_width=True, hide_index=True)
+
+                # ── Fontes de investimento (do recorte de categorias selecionado) ──
+                st.markdown("---")
+                if len(_sel) == len(_cats):
+                    _rotulo = "todas as categorias (visão macro)"
+                elif len(_sel) <= 2:
+                    _rotulo = " · ".join(_sel)
+                else:
+                    _rotulo = f"{len(_sel)} categorias selecionadas"
+                st.subheader("🔹 Fontes de investimento")
+                st.caption(f"Recorte atual: **{_rotulo}**. Mostra de quais fontes de recurso veio "
+                           "o investimento das categorias selecionadas (selecione uma categoria "
+                           "acima para ver só as fontes dela).")
+                if 'Fonte' not in _dff.columns or _dff.empty:
+                    st.info("Sem informação de fonte para o recorte selecionado.")
+                else:
+                    # cor fixa por fonte (consistente entre recortes); 15001 = verde (Rec. Próprios)
+                    _fontes_all = sorted(_dfc['Fonte'].astype(str).str.strip().unique())
+                    _PAL_F = ['#2980b9', '#8e44ad', '#e67e22', '#c0392b', '#16a085',
+                              '#2c3e50', '#d35400', '#7f8c8d', '#2563eb', '#9b59b6', '#27ae60']
+                    _CORF, _pf = {}, 0
+                    for _ft in _fontes_all:
+                        if _ft == '15001':
+                            _CORF[_ft] = '#1a7a4a'
+                        else:
+                            _CORF[_ft] = _PAL_F[_pf % len(_PAL_F)]; _pf += 1
+                    _dff2 = _dff.copy()
+                    _dff2['Fonte'] = _dff2['Fonte'].astype(str).str.strip()
+                    _dpf = _dff2.groupby('Fonte')[liq_cols].sum().sum(axis=1).reset_index()
+                    _dpf.columns = ['Fonte', 'Valor']
+                    _dpf = _dpf[_dpf['Valor'] > 0].sort_values('Valor', ascending=False)
+                    if not len(_dpf):
+                        st.info("Sem despesas liquidadas por fonte no recorte selecionado.")
+                    else:
+                        st.markdown("**Acumulado por fonte**")
+                        fig_fpz = px.pie(_dpf, values='Valor', names='Fonte', hole=0.42,
+                                         color='Fonte', color_discrete_map=_CORF)
+                        fig_fpz.update_traces(textinfo='percent', textposition='inside',
+                            domain=dict(x=[0.0, 1.0], y=[0.34, 1.0]),
+                            hovertemplate=("<span style='color:white;'><b>Fonte %{label}</b><br>"
+                                           "Valor: <b>R$ %{value:,.2f}</b><br>"
+                                           "Participação: <b>%{percent}</b></span><extra></extra>"),
+                            hoverlabel=HOVER_STYLE)
+                        fig_fpz.update_layout(separators=",.", showlegend=True,
+                            legend=dict(orientation="h", yanchor="top", y=0.24, xanchor="center", x=0.5,
+                                        font=dict(size=11)),
+                            height=560, margin=dict(t=30, b=20))
+                        _, _cpf, _ = st.columns([1, 2, 1])
+                        with _cpf:
+                            st.plotly_chart(fig_fpz, use_container_width=True, config=CONFIG_PT)
+
+                        st.markdown("**Movimentação mensal por fonte**")
+                        fig_fm = go.Figure()
+                        for _i, _ft in enumerate(_dpf['Fonte'].tolist()):
+                            _ser = _dff2[_dff2['Fonte'] == _ft]
+                            _ys = [float(_ser[f"{m}_Liquidado"].sum()) if f"{m}_Liquidado" in _ser.columns else 0.0
+                                   for m in meses_disponiveis]
+                            if sum(_ys) == 0: continue
+                            fig_fm.add_bar(x=meses_disponiveis, y=_ys, name=str(_ft),
+                                           marker_color=_CORF.get(_ft, _PAL_F[_i % len(_PAL_F)]))
+                        fig_fm.update_layout(barmode='stack', separators=",.", hoverlabel=HOVER_STYLE,
+                            yaxis=dict(showticklabels=False), showlegend=True,
+                            legend=dict(orientation="h", yanchor="top", y=-0.18, xanchor="center", x=0.5,
+                                        font=dict(size=10)),
+                            height=470, margin=dict(b=130, t=20))
+                        fig_fm.update_traces(hovertemplate=(
+                            "<span style='color:white;'><b>%{x} — Fonte %{data.name}</b><br>"
+                            "Liquidado: <b>R$ %{y:,.2f}</b></span><extra></extra>"))
+                        st.plotly_chart(fig_fm, use_container_width=True, config=CONFIG_PT)
+        st.markdown("---")
+
 
     st.markdown("### 📋 Relatório Geral de Fichas")
     df_f_filt = df_f_raw[df_f_raw['Atividade'].str.contains(
