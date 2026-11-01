@@ -22,3 +22,14 @@ env/
 # Sistema / editor
 .DS_Store
 .vscode/
+
+# ============================================================
+# Dados municipais (lidos AO VIVO das planilhas Google) — não versionar.
+# Mantidos apenas localmente como fallback; não entram no repositório público.
+# ============================================================
+zEducação/
+zSaúde/
+zConvenios/
+Progamas e PDDE/
+*.csv
+*.xlsx
