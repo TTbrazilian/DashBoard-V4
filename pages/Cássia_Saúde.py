@@ -16,6 +16,54 @@ from random import random
 
 st.set_page_config(page_title="Gestão de Recursos - Cássia", layout="wide")
 
+import base64 as _b64_loader
+
+
+def _logo_loader(nome):
+    cands = [f"Logos/{nome}", f"../Logos/{nome}"]
+    try:
+        _d = os.path.dirname(os.path.abspath(__file__))
+        cands += [os.path.join(_d, "Logos", nome), os.path.join(_d, "..", "Logos", nome)]
+    except NameError:
+        pass
+    for p in cands:
+        if os.path.exists(p):
+            return "data:image/png;base64," + _b64_loader.b64encode(open(p, "rb").read()).decode()
+    return ""
+
+
+_LOGO_ESCURO = _logo_loader("LOGOTIPO IG2P - OFICIAL - BRANCO.png")
+_LOGO_CLARO  = _logo_loader("LOGOTIPO IG2P - OFICIAL.png")
+
+if _LOGO_ESCURO or _LOGO_CLARO:
+    st.markdown(f"""
+    <div class="ig2p-loader">
+      <img class="ig2p-logo-escuro" src="{_LOGO_ESCURO}">
+      <img class="ig2p-logo-claro"  src="{_LOGO_CLARO}">
+    </div>
+    <style>
+      [data-testid="stElementContainer"]:has(.ig2p-loader),
+      .element-container:has(.ig2p-loader) {{
+        height:0!important; min-height:0!important; margin:0!important; padding:0!important;
+      }}
+      .ig2p-loader {{ position:fixed; inset:0; z-index:99999; pointer-events:none;
+        display:flex; align-items:center; justify-content:center;
+        background:#0E1117; opacity:1; transition:opacity .45s ease; }}
+      .ig2p-loader.ig2p-done {{ opacity:0; visibility:hidden; }}
+      .ig2p-loader img {{ width:150px; height:auto;
+        animation: ig2pPulse 1.1s ease-in-out infinite; }}
+      .ig2p-loader .ig2p-logo-claro {{ display:none; }}
+      @media (prefers-color-scheme: light) {{
+        .ig2p-loader {{ background:#FFFFFF; }}
+        .ig2p-loader .ig2p-logo-escuro {{ display:none; }}
+        .ig2p-loader .ig2p-logo-claro  {{ display:block; }}
+      }}
+      @keyframes ig2pPulse {{ 0%,100%{{opacity:.35;transform:scale(.94)}}
+                              50%{{opacity:1;transform:scale(1.05)}} }}
+    </style>
+    """, unsafe_allow_html=True)
+
+
 st.markdown("""
     <style>
         @keyframes subirBarra {
@@ -1490,3 +1538,14 @@ if df_raw is not None:
 
 else:
     st.error("Arquivos de dados não encontrados! Verifique a pasta 'zSaúde'.")
+
+
+# ── FIM DO SCRIPT: libera o loader (a página terminou de renderizar) ──────────
+if _LOGO_ESCURO or _LOGO_CLARO:
+    _html_iframe(
+        "<script>(function(){try{"
+        "var d=window.parent.document;"
+        "function done(){var l=d.querySelectorAll('.ig2p-loader');"
+        "for(var i=0;i<l.length;i++){l[i].classList.add('ig2p-done');}}"
+        "done();setTimeout(done,80);"
+        "}catch(e){}})()</script>", height=0)

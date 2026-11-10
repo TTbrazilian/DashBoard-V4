@@ -396,7 +396,7 @@ _, col_edu, _gap, col_sau, _gap2, col_conv, _ = st.columns([1.5, 1.4, 0.12, 1.4,
 with col_edu:
     # 1º: O botão (para alinhar com o topo da coluna ao lado)
     if st.button("Educação", key="btn_educacao", use_container_width=True):
-        st.session_state["setor_ativo"] = "Educação"
+        st.session_state["setor_ativo"] = None if st.session_state.get("setor_ativo") == "Educação" else "Educação"
         st.rerun()
         
     # 2º: A âncora invisível DEPOIS do botão
@@ -404,12 +404,12 @@ with col_edu:
 
 with col_sau:
     if st.button("Saúde", key="btn_saude", use_container_width=True):
-        st.session_state["setor_ativo"] = "Saúde"
+        st.session_state["setor_ativo"] = None if st.session_state.get("setor_ativo") == "Saúde" else "Saúde"
         st.rerun()
 
 with col_conv:
     if st.button("Convênios", key="btn_convenios", use_container_width=True):
-        st.session_state["setor_ativo"] = "Convênios"
+        st.session_state["setor_ativo"] = None if st.session_state.get("setor_ativo") == "Convênios" else "Convênios"
         st.rerun()
 
 # ── 12. GRADE DE MUNICÍPIOS (layout FLAT — sem aninhamento de st.columns) ─────
