@@ -1420,6 +1420,57 @@ if df_raw is not None:
         st.caption(f"Análise da categoria ({meses_disp[0]}–{meses_disp[-1]}).")
         st.markdown("---")
 
+        # ── MAC — recorte Secretaria × Repasse ao Hospital ────────────────────
+        #   Dentro da MAC, fichas cujo Elemento termina em "Hospital" são o
+        #   repasse ao hospital vinculado/parceiro. Separar evita que esse
+        #   repasse (alto) distorça a leitura da execução própria da secretaria.
+        if str(cat).strip().upper() == "MAC" and "Elemento" in df_cat.columns:
+            _mac_liq = [c for c in cols_liq if c in df_cat.columns]
+            _hmask = (df_cat["Elemento"].astype(str).str.strip()
+                      .str.lower().str.endswith("hospital"))
+            if _hmask.any() and _mac_liq:
+                _df_hosp = df_cat[_hmask]
+                _df_sec  = df_cat[~_hmask]
+                def _soma_liq(_d):
+                    _s = 0.0
+                    for _c in _mac_liq:
+                        _s += float(pd.to_numeric(_d[_c], errors="coerce").fillna(0).sum())
+                    return _s
+                _tot_mac  = _soma_liq(df_cat)
+                _tot_sec  = _soma_liq(_df_sec)
+                _tot_hosp = _soma_liq(_df_hosp)
+                _pct_h = (_tot_hosp / _tot_mac * 100.0) if _tot_mac > 0 else 0.0
+                st.subheader("🏥 MAC — Secretaria × Repasse ao Hospital")
+                st.caption("A MAC inclui o repasse ao hospital vinculado/parceiro. "
+                           "Aqui o total aparece separado entre a execução própria da "
+                           "secretaria e o repasse ao hospital (soma dos dois = total da MAC).")
+                _kh1, _kh2, _kh3, _kh4 = st.columns(4)
+                _kh1.metric("Total MAC (liquidado)", formar_real(_tot_mac))
+                _kh2.metric("Execução da Secretaria", formar_real(_tot_sec))
+                _kh3.metric("Repasse ao Hospital", formar_real(_tot_hosp))
+                _kh4.metric("Hospital / Total MAC", f"{_pct_h:.1f}%")
+                _ys_sec = [float(pd.to_numeric(_df_sec[f"{_m}_Liq"], errors="coerce").fillna(0).sum())
+                           if f"{_m}_Liq" in _df_sec.columns else 0.0 for _m in meses_disp]
+                _ys_hos = [float(pd.to_numeric(_df_hosp[f"{_m}_Liq"], errors="coerce").fillna(0).sum())
+                           if f"{_m}_Liq" in _df_hosp.columns else 0.0 for _m in meses_disp]
+                if sum(_ys_sec) + sum(_ys_hos) > 0:
+                    _fig_mh = go.Figure()
+                    _fig_mh.add_bar(x=meses_disp, y=_ys_sec,
+                                    name="Secretaria (execução própria)", marker_color="#1a3a6b")
+                    _fig_mh.add_bar(x=meses_disp, y=_ys_hos,
+                                    name="Repasse ao Hospital", marker_color="#e67e22")
+                    _fig_mh.update_layout(barmode="stack", separators=",.",
+                        hoverlabel=dict(bgcolor="rgba(0,0,0,0.9)", font_size=13, font_color="white"),
+                        yaxis=dict(showticklabels=False), showlegend=True,
+                        legend=dict(orientation="h", yanchor="top", y=-0.18,
+                                    xanchor="center", x=0.5, font=dict(size=10)),
+                        height=430, margin=dict(b=120, t=20))
+                    _fig_mh.update_traces(hovertemplate=(
+                        "<b>%{x} — %{data.name}</b><br>Liquidado: "
+                        "<b>R$ %{y:,.2f}</b><extra></extra>"))
+                    st.plotly_chart(_fig_mh, use_container_width=True, config=CONFIG_PT)
+                st.markdown("---")
+
         render_execucao_orcamentaria(df_cat)
         st.markdown("---")
 
