@@ -1488,6 +1488,96 @@ if df_raw is not None:
         st.caption(f"Análise da categoria ({meses_disp[0]}–{meses_disp[-1]}).")
         st.markdown("---")
 
+        # ── MAC — recorte Secretaria × Repasse ao Hospital ────────────────────
+        #   Dentro da MAC, fichas cujo Elemento termina em "Hospital" são o
+        #   repasse ao hospital vinculado/parceiro. Separar evita que esse
+        #   repasse (alto) distorça a leitura da execução própria da secretaria.
+        if str(cat).strip().upper() == "MAC" and "Elemento" in df_cat.columns:
+            _mac_liq = [c for c in cols_liq if c in df_cat.columns]
+            _hmask = (df_cat["Elemento"].astype(str).str.strip()
+                      .str.lower().str.endswith("hospital"))
+            if _hmask.any() and _mac_liq:
+                _df_hosp = df_cat[_hmask]
+                _df_sec  = df_cat[~_hmask]
+                def _soma_liq(_d):
+                    _s = 0.0
+                    for _c in _mac_liq:
+                        _s += float(pd.to_numeric(_d[_c], errors="coerce").fillna(0).sum())
+                    return _s
+                _tot_mac  = _soma_liq(df_cat)
+                _tot_sec  = _soma_liq(_df_sec)
+                _tot_hosp = _soma_liq(_df_hosp)
+                _pct_h = (_tot_hosp / _tot_mac * 100.0) if _tot_mac > 0 else 0.0
+                st.subheader("🏥 MAC — Secretaria × Repasse ao Hospital")
+                st.caption("A MAC inclui o repasse ao hospital vinculado/parceiro. "
+                           "Aqui o total aparece separado entre a execução própria da "
+                           "secretaria e o repasse ao hospital (soma dos dois = total da MAC).")
+                _kh1, _kh2, _kh3, _kh4 = st.columns(4)
+                _kh1.metric("Total MAC (liquidado)", formar_real(_tot_mac))
+                _kh2.metric("Execução da Secretaria", formar_real(_tot_sec))
+                _kh3.metric("Repasse ao Hospital", formar_real(_tot_hosp))
+                _kh4.metric("Hospital / Total MAC", f"{_pct_h:.1f}%")
+                _ys_sec = [float(pd.to_numeric(_df_sec[f"{_m}_Liq"], errors="coerce").fillna(0).sum())
+                           if f"{_m}_Liq" in _df_sec.columns else 0.0 for _m in meses_disp]
+                _ys_hos = [float(pd.to_numeric(_df_hosp[f"{_m}_Liq"], errors="coerce").fillna(0).sum())
+                           if f"{_m}_Liq" in _df_hosp.columns else 0.0 for _m in meses_disp]
+                if sum(_ys_sec) + sum(_ys_hos) > 0:
+                    _fig_mh = go.Figure()
+                    _fig_mh.add_bar(x=meses_disp, y=_ys_sec,
+                                    name="Secretaria (execução própria)", marker_color="#1a3a6b")
+                    _fig_mh.add_bar(x=meses_disp, y=_ys_hos,
+                                    name="Repasse ao Hospital", marker_color="#e67e22")
+                    _fig_mh.update_layout(barmode="stack", separators=",.",
+                        hoverlabel=dict(bgcolor="rgba(0,0,0,0.9)", font_size=13, font_color="white"),
+                        yaxis=dict(showticklabels=False), showlegend=True,
+                        legend=dict(orientation="h", yanchor="top", y=-0.18,
+                                    xanchor="center", x=0.5, font=dict(size=10)),
+                        height=430, margin=dict(b=120, t=20))
+                    _fig_mh.update_traces(hovertemplate=(
+                        "<b>%{x} — %{data.name}</b><br>Liquidado: "
+                        "<b>R$ %{y:,.2f}</b><extra></extra>"))
+                    st.plotly_chart(_fig_mh, use_container_width=True, config=CONFIG_PT)
+                # ── Fonte do recurso repassado ao hospital ────────────────────
+                if "Fonte" in _df_hosp.columns and not _df_hosp.empty:
+                    _hf = _df_hosp.copy()
+                    _hf["Fonte"] = (_hf["Fonte"].astype(str)
+                                    .str.replace(".0", "", regex=False).str.strip())
+                    _hf = _hf[~_hf["Fonte"].str.lower().isin(["", "nan", "none", "<na>"])]
+                    for _c in _mac_liq:
+                        _hf[_c] = pd.to_numeric(_hf[_c], errors="coerce").fillna(0.0)
+                    _hf["_tot"] = _hf[_mac_liq].sum(axis=1)
+                    _gf = _hf.groupby("Fonte")["_tot"].sum().reset_index()
+                    _gf = _gf[_gf["_tot"] > 0].sort_values("_tot", ascending=False)
+                    if not _gf.empty:
+                        st.markdown("**🔹 Fonte do recurso repassado ao hospital**")
+                        st.caption("De qual fonte saiu o valor repassado ao hospital "
+                                   "vinculado/parceiro (liquidado no período).")
+                        _figf = px.pie(_gf, values="_tot", names="Fonte", hole=0.42,
+                                       color="Fonte",
+                                       color_discrete_map={f: cor_fonte(f) for f in _gf["Fonte"]})
+                        _figf.update_traces(textinfo="percent", textposition="inside",
+                            hovertemplate=("<b>Fonte %{label}</b><br>Valor: "
+                                           "<b>R$ %{value:,.2f}</b><br>"
+                                           "Participação: <b>%{percent}</b><extra></extra>"),
+                            hoverlabel=dict(bgcolor="rgba(0,0,0,0.9)", font_size=13,
+                                            font_color="white"))
+                        _figf.update_layout(separators=",.", showlegend=True,
+                            legend=dict(orientation="h", yanchor="top", y=-0.05,
+                                        xanchor="center", x=0.5, font=dict(size=11)),
+                            height=420, margin=dict(t=20, b=40))
+                        _, _cfp, _ = st.columns([1, 2, 1])
+                        with _cfp:
+                            st.plotly_chart(_figf, use_container_width=True, config=CONFIG_PT)
+                        _tot_hf = float(_gf["_tot"].sum())
+                        _tabf = pd.DataFrame({
+                            "Fonte": _gf["Fonte"].apply(fonte_lbl),
+                            "Valor": _gf["_tot"].apply(formar_real),
+                            "Participação": _gf["_tot"].apply(
+                                lambda v: f"{(v / _tot_hf * 100):.1f}%" if _tot_hf > 0 else "—"),
+                        })
+                        st.dataframe(_tabf, use_container_width=True, hide_index=True)
+                st.markdown("---")
+
         render_execucao_orcamentaria(df_cat)
         st.markdown("---")
 

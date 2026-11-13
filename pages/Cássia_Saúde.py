@@ -1517,6 +1517,45 @@ if df_raw is not None:
                         "<b>%{x} — %{data.name}</b><br>Liquidado: "
                         "<b>R$ %{y:,.2f}</b><extra></extra>"))
                     st.plotly_chart(_fig_mh, use_container_width=True, config=CONFIG_PT)
+                # ── Fonte do recurso repassado ao hospital ────────────────────
+                if "Fonte" in _df_hosp.columns and not _df_hosp.empty:
+                    _hf = _df_hosp.copy()
+                    _hf["Fonte"] = (_hf["Fonte"].astype(str)
+                                    .str.replace(".0", "", regex=False).str.strip())
+                    _hf = _hf[~_hf["Fonte"].str.lower().isin(["", "nan", "none", "<na>"])]
+                    for _c in _mac_liq:
+                        _hf[_c] = pd.to_numeric(_hf[_c], errors="coerce").fillna(0.0)
+                    _hf["_tot"] = _hf[_mac_liq].sum(axis=1)
+                    _gf = _hf.groupby("Fonte")["_tot"].sum().reset_index()
+                    _gf = _gf[_gf["_tot"] > 0].sort_values("_tot", ascending=False)
+                    if not _gf.empty:
+                        st.markdown("**🔹 Fonte do recurso repassado ao hospital**")
+                        st.caption("De qual fonte saiu o valor repassado ao hospital "
+                                   "vinculado/parceiro (liquidado no período).")
+                        _figf = px.pie(_gf, values="_tot", names="Fonte", hole=0.42,
+                                       color="Fonte",
+                                       color_discrete_map={f: cor_fonte(f) for f in _gf["Fonte"]})
+                        _figf.update_traces(textinfo="percent", textposition="inside",
+                            hovertemplate=("<b>Fonte %{label}</b><br>Valor: "
+                                           "<b>R$ %{value:,.2f}</b><br>"
+                                           "Participação: <b>%{percent}</b><extra></extra>"),
+                            hoverlabel=dict(bgcolor="rgba(0,0,0,0.9)", font_size=13,
+                                            font_color="white"))
+                        _figf.update_layout(separators=",.", showlegend=True,
+                            legend=dict(orientation="h", yanchor="top", y=-0.05,
+                                        xanchor="center", x=0.5, font=dict(size=11)),
+                            height=420, margin=dict(t=20, b=40))
+                        _, _cfp, _ = st.columns([1, 2, 1])
+                        with _cfp:
+                            st.plotly_chart(_figf, use_container_width=True, config=CONFIG_PT)
+                        _tot_hf = float(_gf["_tot"].sum())
+                        _tabf = pd.DataFrame({
+                            "Fonte": _gf["Fonte"].apply(fonte_lbl),
+                            "Valor": _gf["_tot"].apply(formar_real),
+                            "Participação": _gf["_tot"].apply(
+                                lambda v: f"{(v / _tot_hf * 100):.1f}%" if _tot_hf > 0 else "—"),
+                        })
+                        st.dataframe(_tabf, use_container_width=True, hide_index=True)
                 st.markdown("---")
 
         render_execucao_orcamentaria(df_cat)
