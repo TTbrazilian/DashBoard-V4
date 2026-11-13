@@ -409,7 +409,7 @@ def load_data():
 
     # ── DESPESAS POR FONTE ───────────────────────────────────────────────────
     df_df = None
-    if path_df:
+    if sid or path_df:
         df_df = _fonte(sid, "Despesas por fonte", path_df, sep=None, engine='python', encoding='utf-8')
         df_df.columns = [str(c).strip() for c in df_df.columns]
         df_df['Tipo'] = df_df['Tipo'].replace({'Empenho': 'Liquidado'})
